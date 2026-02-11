@@ -1,17 +1,17 @@
-// Package driver defines the capability-based driver interfaces for BMC management.
+// Package provider defines the capability-based provider interfaces for BMC management.
 //
-// Each driver implements a subset of capabilities (power control, virtual media,
-// boot device, BMC info). Multiple drivers can be composed for a single device,
+// Each provider implements a subset of capabilities (power control, virtual media,
+// boot device, BMC info). Multiple providers can be composed for a single device,
 // and the management API merges their capabilities to expose unified Redfish and
 // RPC endpoints.
 //
 // This design is inspired by github.com/bmc-toolbox/bmclib, where different
 // providers implement different BMC operations.
-package driver
+package provider
 
 import "context"
 
-// Capability represents a BMC management capability that a driver can provide.
+// Capability represents a BMC management capability that a provider can offer.
 type Capability string
 
 const (
@@ -28,23 +28,23 @@ type VirtualMediaState struct {
 	Kind     string `json:"kind"`
 }
 
-// Driver is the base interface for all BMC management drivers.
-type Driver interface {
-	// Name returns the driver type identifier (e.g., "jetkvm").
+// Provider is the base interface for all BMC management providers.
+type Provider interface {
+	// Name returns the provider type identifier (e.g., "jetkvm", "unifi").
 	Name() string
 
-	// Capabilities returns the list of capabilities this driver provides.
+	// Capabilities returns the list of capabilities this provider offers.
 	Capabilities() []Capability
 
-	// Open initializes the driver connection to the BMC/device.
+	// Open initializes the provider connection to the BMC/device.
 	Open(ctx context.Context) error
 
-	// Close releases driver resources and connections.
+	// Close releases provider resources and connections.
 	Close() error
 }
 
 // PowerController provides power management operations.
-// Drivers that support CapPowerControl should implement this interface.
+// Providers that support CapPowerControl should implement this interface.
 type PowerController interface {
 	// GetPowerState returns the current power state ("on", "off", "unknown").
 	GetPowerState(ctx context.Context) (string, error)
@@ -54,7 +54,7 @@ type PowerController interface {
 }
 
 // VirtualMediaController provides virtual media mount/unmount operations.
-// Drivers that support CapVirtualMedia should implement this interface.
+// Providers that support CapVirtualMedia should implement this interface.
 type VirtualMediaController interface {
 	// MountMedia mounts an image from a URL. Kind is "cdrom" or "floppy".
 	MountMedia(ctx context.Context, url, kind string) error
@@ -67,22 +67,22 @@ type VirtualMediaController interface {
 }
 
 // BootDeviceController provides boot device configuration.
-// Drivers that support CapBootDevice should implement this interface.
+// Providers that support CapBootDevice should implement this interface.
 type BootDeviceController interface {
 	// SetBootDevice sets the next boot device (e.g., "pxe", "disk", "cdrom").
 	SetBootDevice(ctx context.Context, device string, persistent, efiBoot bool) error
 }
 
 // BMCInfoProvider provides BMC version and identification information.
-// Drivers that support CapBMCInfo should implement this interface.
+// Providers that support CapBMCInfo should implement this interface.
 type BMCInfoProvider interface {
 	// GetBMCVersion returns the BMC firmware version string.
 	GetBMCVersion(ctx context.Context) (string, error)
 }
 
-// HasCapability checks if a driver provides a specific capability.
-func HasCapability(d Driver, cap Capability) bool {
-	for _, c := range d.Capabilities() {
+// HasCapability checks if a provider offers a specific capability.
+func HasCapability(p Provider, cap Capability) bool {
+	for _, c := range p.Capabilities() {
 		if c == cap {
 			return true
 		}

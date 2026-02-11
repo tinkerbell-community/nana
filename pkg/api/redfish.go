@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/jetkvm/cloud-api/mgmt-api/pkg/driver"
+	"github.com/jetkvm/cloud-api/mgmt-api/pkg/provider"
 )
 
 // RedfishService provides Redfish v1 REST API endpoints.
@@ -35,11 +35,11 @@ type RedfishService interface {
 }
 
 type redfishService struct {
-	dm *driver.DeviceManager
+	dm *provider.DeviceManager
 }
 
 // NewRedfishService creates a new Redfish API service.
-func NewRedfishService(dm *driver.DeviceManager) RedfishService {
+func NewRedfishService(dm *provider.DeviceManager) RedfishService {
 	return &redfishService{dm: dm}
 }
 
@@ -90,14 +90,14 @@ func writeRedfishError(w http.ResponseWriter, status int, message string) {
 }
 
 // systemID returns the Redfish-safe ID for a managed device.
-func systemID(d *driver.ManagedDevice) string {
+func systemID(d *provider.ManagedDevice) string {
 	if d.Name != "" {
 		return d.Name
 	}
-	return driver.MACToRedfishID(d.MAC)
+	return provider.MACToRedfishID(d.MAC)
 }
 
-func (s *redfishService) resolveSystem(r *http.Request) (*driver.ManagedDevice, error) {
+func (s *redfishService) resolveSystem(r *http.Request) (*provider.ManagedDevice, error) {
 	id := r.PathValue("systemId")
 	if id == "" {
 		return nil, fmt.Errorf("system ID is required")
@@ -136,7 +136,7 @@ func (s *redfishService) Systems(w http.ResponseWriter, _ *http.Request) {
 	members := make([]odataID, 0, len(devices))
 	for _, d := range devices {
 		// Only include devices that have power control capability.
-		if d.HasCapability(driver.CapPowerControl) || d.HasCapability(driver.CapVirtualMedia) || d.HasCapability(driver.CapBootDevice) {
+		if d.HasCapability(provider.CapPowerControl) || d.HasCapability(provider.CapVirtualMedia) || d.HasCapability(provider.CapBootDevice) {
 			members = append(members, odataID{
 				ODataID: fmt.Sprintf("/redfish/v1/Systems/%s", systemID(d)),
 			})
@@ -194,7 +194,7 @@ func (s *redfishService) System(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Virtual media link.
-	if dev.HasCapability(driver.CapVirtualMedia) {
+	if dev.HasCapability(provider.CapVirtualMedia) {
 		body["VirtualMedia"] = odataID{
 			ODataID: fmt.Sprintf("/redfish/v1/Systems/%s/VirtualMedia", sysID),
 		}
@@ -256,7 +256,7 @@ func (s *redfishService) VirtualMediaCollection(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	if !dev.HasCapability(driver.CapVirtualMedia) {
+	if !dev.HasCapability(provider.CapVirtualMedia) {
 		writeRedfishError(w, http.StatusNotFound, "device does not support virtual media")
 		return
 	}
@@ -400,7 +400,7 @@ func (s *redfishService) Managers(w http.ResponseWriter, _ *http.Request) {
 	devices := s.dm.AllDevices()
 	members := make([]odataID, 0, len(devices))
 	for _, d := range devices {
-		if d.HasCapability(driver.CapBMCInfo) {
+		if d.HasCapability(provider.CapBMCInfo) {
 			members = append(members, odataID{
 				ODataID: fmt.Sprintf("/redfish/v1/Managers/%s", systemID(d)),
 			})

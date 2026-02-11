@@ -5,27 +5,27 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/jetkvm/cloud-api/mgmt-api/pkg/driver"
+	"github.com/jetkvm/cloud-api/mgmt-api/pkg/provider"
 )
 
 // stubDriver is a minimal driver for testing device resolution.
-type stubDriver struct{}
+type stubProvider struct{}
 
-func (s *stubDriver) Name() string                       { return "stub" }
-func (s *stubDriver) Capabilities() []driver.Capability   { return []driver.Capability{driver.CapPowerControl} }
-func (s *stubDriver) Open(_ context.Context) error        { return nil }
-func (s *stubDriver) Close() error                        { return nil }
+func (s *stubProvider) Name() string                       { return "stub" }
+func (s *stubProvider) Capabilities() []provider.Capability   { return []provider.Capability{provider.CapPowerControl} }
+func (s *stubProvider) Open(_ context.Context) error        { return nil }
+func (s *stubProvider) Close() error                        { return nil }
 
-func newTestDeviceManager() *driver.DeviceManager {
-	dm := driver.NewDeviceManager()
-	dm.AddDevice(&driver.ManagedDevice{
-		Name:    "server-01",
-		MAC:     "AA:BB:CC:DD:EE:FF",
-		Drivers: []driver.Driver{&stubDriver{}},
+func newTestDeviceManager() *provider.DeviceManager {
+	dm := provider.NewDeviceManager()
+	dm.AddDevice(&provider.ManagedDevice{
+		Name:      "server-01",
+		MAC:       "AA:BB:CC:DD:EE:FF",
+		Providers: []provider.Provider{&stubProvider{}},
 	})
-	dm.AddDevice(&driver.ManagedDevice{
-		MAC:     "11:22:33:44:55:66",
-		Drivers: []driver.Driver{&stubDriver{}},
+	dm.AddDevice(&provider.ManagedDevice{
+		MAC:       "11:22:33:44:55:66",
+		Providers: []provider.Provider{&stubProvider{}},
 	})
 	return dm
 }

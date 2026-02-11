@@ -112,7 +112,7 @@ func TestValidateConfig(t *testing.T) {
 					{
 						Name: "server-01",
 						MAC:  "AA:BB:CC:DD:EE:FF",
-						Drivers: []DriverConfig{
+						Providers: []ProviderConfig{
 							{Type: "jetkvm", Host: "192.168.1.100"},
 						},
 					},
@@ -128,7 +128,7 @@ func TestValidateConfig(t *testing.T) {
 				Devices: []DeviceConfig{
 					{
 						Name: "server-01",
-						Drivers: []DriverConfig{
+						Providers: []ProviderConfig{
 							{Type: "jetkvm", Host: "192.168.1.100"},
 						},
 					},
@@ -138,7 +138,7 @@ func TestValidateConfig(t *testing.T) {
 			errorMsg:    "mac address is required",
 		},
 		{
-			name: "device missing drivers",
+			name: "device missing providers",
 			config: &Config{
 				Port:          5000,
 				WebRTCTimeout: 30,
@@ -149,24 +149,24 @@ func TestValidateConfig(t *testing.T) {
 				},
 			},
 			expectError: true,
-			errorMsg:    "at least one driver is required",
+			errorMsg:    "at least one provider is required",
 		},
 		{
-			name: "driver missing type",
+			name: "provider missing type",
 			config: &Config{
 				Port:          5000,
 				WebRTCTimeout: 30,
 				Devices: []DeviceConfig{
 					{
 						MAC: "AA:BB:CC:DD:EE:FF",
-						Drivers: []DriverConfig{
+						Providers: []ProviderConfig{
 							{Host: "192.168.1.100"},
 						},
 					},
 				},
 			},
 			expectError: true,
-			errorMsg:    "driver type is required",
+			errorMsg:    "provider type is required",
 		},
 		{
 			name: "invalid port - negative",

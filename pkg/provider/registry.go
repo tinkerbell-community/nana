@@ -1,4 +1,4 @@
-package driver
+package provider
 
 import (
 	"fmt"
@@ -6,31 +6,31 @@ import (
 	"sync"
 )
 
-// DriverConfig holds typed driver configuration from YAML.
-type DriverConfig struct {
+// ProviderConfig holds typed provider configuration from YAML.
+type ProviderConfig struct {
 	Type     string `mapstructure:"type" yaml:"type"`
 	Host     string `mapstructure:"host" yaml:"host"`
 	Password string `mapstructure:"password" yaml:"password"`
 }
 
-// ToMap converts a DriverConfig to a generic map for driver factories.
-func (dc *DriverConfig) ToMap() map[string]interface{} {
+// ToMap converts a ProviderConfig to a generic map for provider factories.
+func (pc *ProviderConfig) ToMap() map[string]interface{} {
 	m := map[string]interface{}{
-		"type": dc.Type,
+		"type": pc.Type,
 	}
-	if dc.Host != "" {
-		m["host"] = dc.Host
+	if pc.Host != "" {
+		m["host"] = pc.Host
 	}
-	if dc.Password != "" {
-		m["password"] = dc.Password
+	if pc.Password != "" {
+		m["password"] = pc.Password
 	}
 	return m
 }
 
-// Factory creates a driver instance from configuration.
-type Factory func(cfg map[string]interface{}) (Driver, error)
+// Factory creates a provider instance from configuration.
+type Factory func(cfg map[string]interface{}) (Provider, error)
 
-// Registry manages driver factories and allows creating drivers by type name.
+// Registry manages provider factories and allows creating providers by type name.
 type Registry struct {
 	mu        sync.RWMutex
 	factories map[string]Factory
@@ -38,32 +38,32 @@ type Registry struct {
 
 var defaultRegistry = NewRegistry()
 
-// NewRegistry creates a new driver registry.
+// NewRegistry creates a new provider registry.
 func NewRegistry() *Registry {
 	return &Registry{
 		factories: make(map[string]Factory),
 	}
 }
 
-// Register adds a driver factory to the registry.
+// Register adds a provider factory to the registry.
 func (r *Registry) Register(name string, factory Factory) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.factories[name] = factory
 }
 
-// Create instantiates a driver from the registry.
-func (r *Registry) Create(name string, cfg map[string]interface{}) (Driver, error) {
+// Create instantiates a provider from the registry.
+func (r *Registry) Create(name string, cfg map[string]interface{}) (Provider, error) {
 	r.mu.RLock()
 	factory, ok := r.factories[name]
 	r.mu.RUnlock()
 	if !ok {
-		return nil, fmt.Errorf("unknown driver type: %s", name)
+		return nil, fmt.Errorf("unknown provider type: %s", name)
 	}
 	return factory(cfg)
 }
 
-// Available returns the names of all registered driver types.
+// Available returns the names of all registered provider types.
 func (r *Registry) Available() []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -74,26 +74,26 @@ func (r *Registry) Available() []string {
 	return names
 }
 
-// Register adds a driver factory to the default registry.
+// Register adds a provider factory to the default registry.
 func Register(name string, factory Factory) {
 	defaultRegistry.Register(name, factory)
 }
 
-// Create instantiates a driver from the default registry.
-func Create(name string, cfg map[string]interface{}) (Driver, error) {
+// Create instantiates a provider from the default registry.
+func Create(name string, cfg map[string]interface{}) (Provider, error) {
 	return defaultRegistry.Create(name, cfg)
 }
 
-// Available returns the available driver types from the default registry.
+// Available returns the available provider types from the default registry.
 func Available() []string {
 	return defaultRegistry.Available()
 }
 
-// ManagedDevice represents a device with one or more drivers providing BMC capabilities.
+// ManagedDevice represents a device with one or more providers offering BMC capabilities.
 type ManagedDevice struct {
-	Name    string
-	MAC     string
-	Drivers []Driver
+	Name      string
+	MAC       string
+	Providers []Provider
 }
 
 // ID returns the preferred identifier for the device (name, falling back to MAC).
@@ -104,62 +104,62 @@ func (d *ManagedDevice) ID() string {
 	return d.MAC
 }
 
-// HasCapability returns true if any driver provides the given capability.
+// HasCapability returns true if any provider offers the given capability.
 func (d *ManagedDevice) HasCapability(cap Capability) bool {
-	for _, drv := range d.Drivers {
-		if HasCapability(drv, cap) {
+	for _, p := range d.Providers {
+		if HasCapability(p, cap) {
 			return true
 		}
 	}
 	return false
 }
 
-// PowerController returns the first driver that implements PowerController, or nil.
+// PowerController returns the first provider that implements PowerController, or nil.
 func (d *ManagedDevice) PowerController() PowerController {
-	for _, drv := range d.Drivers {
-		if pc, ok := drv.(PowerController); ok && HasCapability(drv, CapPowerControl) {
+	for _, p := range d.Providers {
+		if pc, ok := p.(PowerController); ok && HasCapability(p, CapPowerControl) {
 			return pc
 		}
 	}
 	return nil
 }
 
-// VirtualMediaController returns the first driver that implements VirtualMediaController, or nil.
+// VirtualMediaController returns the first provider that implements VirtualMediaController, or nil.
 func (d *ManagedDevice) VirtualMediaController() VirtualMediaController {
-	for _, drv := range d.Drivers {
-		if vmc, ok := drv.(VirtualMediaController); ok && HasCapability(drv, CapVirtualMedia) {
+	for _, p := range d.Providers {
+		if vmc, ok := p.(VirtualMediaController); ok && HasCapability(p, CapVirtualMedia) {
 			return vmc
 		}
 	}
 	return nil
 }
 
-// BootDeviceController returns the first driver that implements BootDeviceController, or nil.
+// BootDeviceController returns the first provider that implements BootDeviceController, or nil.
 func (d *ManagedDevice) BootDeviceController() BootDeviceController {
-	for _, drv := range d.Drivers {
-		if bdc, ok := drv.(BootDeviceController); ok && HasCapability(drv, CapBootDevice) {
+	for _, p := range d.Providers {
+		if bdc, ok := p.(BootDeviceController); ok && HasCapability(p, CapBootDevice) {
 			return bdc
 		}
 	}
 	return nil
 }
 
-// BMCInfoProvider returns the first driver that implements BMCInfoProvider, or nil.
+// BMCInfoProvider returns the first provider that implements BMCInfoProvider, or nil.
 func (d *ManagedDevice) BMCInfoProvider() BMCInfoProvider {
-	for _, drv := range d.Drivers {
-		if bip, ok := drv.(BMCInfoProvider); ok && HasCapability(drv, CapBMCInfo) {
+	for _, p := range d.Providers {
+		if bip, ok := p.(BMCInfoProvider); ok && HasCapability(p, CapBMCInfo) {
 			return bip
 		}
 	}
 	return nil
 }
 
-// MergedCapabilities returns the union of capabilities across all drivers.
+// MergedCapabilities returns the union of capabilities across all providers.
 func (d *ManagedDevice) MergedCapabilities() []Capability {
 	seen := make(map[Capability]bool)
 	var caps []Capability
-	for _, drv := range d.Drivers {
-		for _, cap := range drv.Capabilities() {
+	for _, p := range d.Providers {
+		for _, cap := range p.Capabilities() {
 			if !seen[cap] {
 				seen[cap] = true
 				caps = append(caps, cap)

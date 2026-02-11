@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/jetkvm/cloud-api/mgmt-api/pkg/driver"
+	"github.com/jetkvm/cloud-api/mgmt-api/pkg/provider"
 	"github.com/jetkvm/cloud-api/mgmt-api/pkg/models"
 )
 
@@ -19,7 +19,7 @@ type RpcService interface {
 }
 
 type rpcService struct {
-	dm         *driver.DeviceManager
+	dm         *provider.DeviceManager
 	rpcTimeout time.Duration
 	logger     *slog.Logger
 }
@@ -33,7 +33,7 @@ func writeError(w http.ResponseWriter, statusCode int, message string) {
 	}
 }
 
-func (s *rpcService) getDevice(r *http.Request) (*driver.ManagedDevice, error) {
+func (s *rpcService) getDevice(r *http.Request) (*provider.ManagedDevice, error) {
 	// First try X-Device header.
 	dev, err := models.ResolveDevice(r, s.dm)
 	if err != nil {
@@ -42,14 +42,14 @@ func (s *rpcService) getDevice(r *http.Request) (*driver.ManagedDevice, error) {
 	return dev, nil
 }
 
-func (s *rpcService) getDeviceByHost(host string) (*driver.ManagedDevice, error) {
+func (s *rpcService) getDeviceByHost(host string) (*provider.ManagedDevice, error) {
 	if host == "" {
 		return nil, fmt.Errorf("device identifier is required")
 	}
 	return models.ResolveDeviceByID(host, s.dm)
 }
 
-func (s *rpcService) getPowerState(ctx context.Context, dev *driver.ManagedDevice) (string, error) {
+func (s *rpcService) getPowerState(ctx context.Context, dev *provider.ManagedDevice) (string, error) {
 	pc := dev.PowerController()
 	if pc == nil {
 		return "", fmt.Errorf("device does not support power control")
@@ -57,7 +57,7 @@ func (s *rpcService) getPowerState(ctx context.Context, dev *driver.ManagedDevic
 	return pc.GetPowerState(ctx)
 }
 
-func (s *rpcService) setPowerState(ctx context.Context, dev *driver.ManagedDevice, state string) error {
+func (s *rpcService) setPowerState(ctx context.Context, dev *provider.ManagedDevice, state string) error {
 	pc := dev.PowerController()
 	if pc == nil {
 		return fmt.Errorf("device does not support power control")
@@ -103,7 +103,7 @@ func (s *rpcService) RpcHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Resolve device: try X-Device header first, then host field from request.
-	var dev *driver.ManagedDevice
+	var dev *provider.ManagedDevice
 	var err error
 
 	dev, err = s.getDevice(r)
@@ -250,7 +250,7 @@ func (s *rpcService) RpcHandler(w http.ResponseWriter, r *http.Request) {
 				"device":       p.Device,
 				"persistent":   p.Persistent,
 				"efiBoot":      p.EFIBoot,
-				"message":      "boot device setting not supported by configured drivers; use virtual media for PXE boot",
+				"message":      "boot device setting not supported by configured providers; use virtual media for PXE boot",
 			}
 		}
 
@@ -371,7 +371,7 @@ func writeResponse(w http.ResponseWriter, rp ResponsePayload) {
 }
 
 // NewBMCService creates a new RPC service for BMC-compatible management.
-func NewBMCService(dm *driver.DeviceManager, rpcTimeout time.Duration, logger *slog.Logger) RpcService {
+func NewBMCService(dm *provider.DeviceManager, rpcTimeout time.Duration, logger *slog.Logger) RpcService {
 	if rpcTimeout == 0 {
 		rpcTimeout = 30 * time.Second
 	}

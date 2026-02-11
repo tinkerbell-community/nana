@@ -2,7 +2,7 @@
 // supporting CLI flags, environment variables, and YAML config files via Viper.
 //
 // The configuration defines server settings and a list of managed devices,
-// each with a MAC address, optional name, and one or more BMC drivers.
+// each with a MAC address, optional name, and one or more BMC providers.
 package config
 
 import (
@@ -24,6 +24,9 @@ type Config struct {
 
 	// Managed devices.
 	Devices []DeviceConfig `mapstructure:"devices" yaml:"devices"`
+
+	// SSH settings (used by providers that connect via SSH, e.g. unifi).
+	SSHKeyPath string `mapstructure:"ssh_key_path" yaml:"ssh_key_path"`
 }
 
 // DeviceConfig holds configuration for a managed BMC device.
@@ -36,20 +39,29 @@ type DeviceConfig struct {
 	// and as the canonical device identifier.
 	MAC string `mapstructure:"mac" yaml:"mac"`
 
-	// Drivers lists the BMC drivers that provide capabilities for this device.
-	Drivers []DriverConfig `mapstructure:"drivers" yaml:"drivers"`
+	// Providers lists the BMC providers that offer capabilities for this device.
+	Providers []ProviderConfig `mapstructure:"providers" yaml:"providers"`
 }
 
-// DriverConfig holds configuration for a single driver instance.
-type DriverConfig struct {
-	// Type is the driver type name (e.g., "jetkvm").
+// ProviderConfig holds configuration for a single provider instance.
+type ProviderConfig struct {
+	// Type is the provider type name (e.g., "jetkvm", "unifi").
 	Type string `mapstructure:"type" yaml:"type"`
 
-	// Host is the driver's target hostname or IP address.
+	// Host is the provider's target hostname or IP address.
 	Host string `mapstructure:"host" yaml:"host"`
 
 	// Password is the optional authentication credential.
 	Password string `mapstructure:"password" yaml:"password"`
+
+	// SSHPort is the SSH port (default: 22). Used by SSH-based providers.
+	SSHPort int `mapstructure:"ssh_port" yaml:"ssh_port"`
+
+	// SSHUsername is the SSH username (default: "root"). Used by SSH-based providers.
+	SSHUsername string `mapstructure:"ssh_username" yaml:"ssh_username"`
+
+	// SSHKeyPath overrides the global ssh_key_path for this provider.
+	SSHKeyPath string `mapstructure:"ssh_key_path" yaml:"ssh_key_path"`
 }
 
 var (
@@ -123,12 +135,12 @@ func validateConfig(config *Config) error {
 		if dev.MAC == "" {
 			return fmt.Errorf("device[%d]: mac address is required", i)
 		}
-		if len(dev.Drivers) == 0 {
-			return fmt.Errorf("device[%d] (%s): at least one driver is required", i, dev.MAC)
+		if len(dev.Providers) == 0 {
+			return fmt.Errorf("device[%d] (%s): at least one provider is required", i, dev.MAC)
 		}
-		for j, drv := range dev.Drivers {
-			if drv.Type == "" {
-				return fmt.Errorf("device[%d].drivers[%d]: driver type is required", i, j)
+		for j, prv := range dev.Providers {
+			if prv.Type == "" {
+				return fmt.Errorf("device[%d].providers[%d]: provider type is required", i, j)
 			}
 		}
 	}

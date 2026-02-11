@@ -5,32 +5,58 @@ address: "0.0.0.0"
 # WebRTC connection timeout (seconds)
 webrtc_timeout: 30
 
+# Global SSH key path (used by SSH-based providers like unifi, can be
+# overridden per-provider).
+# ssh_key_path: "~/.ssh/id_rsa"
+
 # Managed devices
-# Each device requires a MAC address and at least one driver.
+# Each device requires a MAC address and at least one provider.
 # The 'name' field is optional but recommended — it becomes the primary
 # Redfish system ID. If omitted, the MAC address is used instead.
 #
-# Multiple drivers can be specified per device. Capabilities from all
-# drivers are merged, so if one driver provides power control and another
-# provides virtual media, both features are available via Redfish and RPC.
+# Multiple providers can be specified per device. Capabilities from all
+# providers are merged, so if one provider offers power control and another
+# offers virtual media, both features are available via Redfish and RPC.
 devices:
   - name: "server-01"
     mac: "AA:BB:CC:DD:EE:FF"
-    drivers:
+    providers:
       - type: "jetkvm"
         host: "192.168.1.100"
         password: ""
 
   - name: "server-02"
     mac: "11:22:33:44:55:66"
-    drivers:
+    providers:
       - type: "jetkvm"
         host: "192.168.1.101"
         password: "secret"
 
-  # Example: device identified only by MAC (no name).
-  # Redfish system ID will be "AA-BB-CC-DD-EE-01".
-  # - mac: "AA:BB:CC:DD:EE:01"
-  #   drivers:
+  # Example: device powered via UniFi switch PoE.
+  # The unifi provider connects to the switch over SSH and discovers
+  # the port for this device's MAC address automatically.
+  # - name: "poe-device-01"
+  #   mac: "AA:BB:CC:DD:EE:01"
+  #   providers:
+  #     - type: "unifi"
+  #       host: "10.0.24.136"
+  #       ssh_username: "root"
+  #       ssh_key_path: "~/.ssh/id_rsa"
+
+  # Example: device with multiple providers (merged capabilities).
+  # JetKVM provides virtual media + BMC info, UniFi provides power control.
+  # - name: "hybrid-device"
+  #   mac: "AA:BB:CC:DD:EE:02"
+  #   providers:
   #     - type: "jetkvm"
   #       host: "192.168.1.102"
+  #     - type: "unifi"
+  #       host: "10.0.24.136"
+  #       ssh_key_path: "~/.ssh/id_rsa"
+
+  # Example: device identified only by MAC (no name).
+  # Redfish system ID will be "AA-BB-CC-DD-EE-03".
+  # - mac: "AA:BB:CC:DD:EE:03"
+  #   providers:
+  #     - type: "jetkvm"
+  #       host: "192.168.1.103"

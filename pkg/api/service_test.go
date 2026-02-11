@@ -9,191 +9,112 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
 
-	"github.com/jetkvm/cloud-api/mgmt-api/pkg/client"
-	"github.com/jetkvm/cloud-api/mgmt-api/pkg/config"
+	"github.com/jetkvm/cloud-api/mgmt-api/pkg/provider"
 )
 
-type mockKVMClient struct {
-	powerState       client.PowerState
-	dcPowerState     bool
-	atxState         *client.ATXState
-	virtualMedia     *client.VirtualMediaState
-	videoState       *client.VideoState
-	deviceInfo       *client.DeviceInfo
-	deviceVersion    *client.DeviceVersion
-	usbState         any
-	edid             string
-	setPowerErr      error
-	setDCPowerErr    error
-	setATXErr        error
-	mountErr         error
-	unmountErr       error
-	connectErr       error
+// mockTestDriver implements all provider capability interfaces for testing.
+type mockTestDriver struct {
+	powerState string
+	mediaState *provider.VirtualMediaState
+	bmcVersion string
+	bootDevice string
+	caps       []provider.Capability
+	setPowerErr error
 }
 
-func (m *mockKVMClient) Connect(_ context.Context) error {
-	return m.connectErr
-}
+func (m *mockTestDriver) Name() string                       { return "mock" }
+func (m *mockTestDriver) Capabilities() []provider.Capability   { return m.caps }
+func (m *mockTestDriver) Open(_ context.Context) error        { return nil }
+func (m *mockTestDriver) Close() error                        { return nil }
 
-func (m *mockKVMClient) Close() error {
-	return nil
-}
-
-func (m *mockKVMClient) GetDeviceInfo(_ context.Context) (*client.DeviceInfo, error) {
-	if m.deviceInfo == nil {
-		return &client.DeviceInfo{DeviceID: "test-device", AuthMode: "noPassword"}, nil
-	}
-	return m.deviceInfo, nil
-}
-
-func (m *mockKVMClient) GetPowerState(_ context.Context) (client.PowerState, error) {
+func (m *mockTestDriver) GetPowerState(_ context.Context) (string, error) {
 	return m.powerState, nil
 }
 
-func (m *mockKVMClient) SetPowerState(_ context.Context, state string) error {
+func (m *mockTestDriver) SetPowerState(_ context.Context, state string) error {
 	if m.setPowerErr != nil {
 		return m.setPowerErr
 	}
-	switch state {
-	case "on":
-		m.powerState = client.PowerOn
-	case "off":
-		m.powerState = client.PowerOff
-	}
+	m.powerState = state
 	return nil
 }
 
-func (m *mockKVMClient) GetDCPowerState(_ context.Context) (bool, error) {
-	return m.dcPowerState, nil
-}
-
-func (m *mockKVMClient) SetDCPowerState(_ context.Context, enabled bool) error {
-	if m.setDCPowerErr != nil {
-		return m.setDCPowerErr
-	}
-	m.dcPowerState = enabled
+func (m *mockTestDriver) MountMedia(_ context.Context, url, kind string) error {
+	m.mediaState = &provider.VirtualMediaState{Inserted: true, Image: url, Kind: kind}
 	return nil
 }
 
-func (m *mockKVMClient) GetATXState(_ context.Context) (*client.ATXState, error) {
-	if m.atxState == nil {
-		return &client.ATXState{PowerLED: m.powerState == client.PowerOn}, nil
-	}
-	return m.atxState, nil
-}
-
-func (m *mockKVMClient) SetATXPowerAction(_ context.Context, action client.ATXAction) error {
-	if m.setATXErr != nil {
-		return m.setATXErr
-	}
-	switch action {
-	case client.ATXPowerOn:
-		m.powerState = client.PowerOn
-	case client.ATXPowerOff:
-		m.powerState = client.PowerOff
-	}
+func (m *mockTestDriver) UnmountMedia(_ context.Context) error {
+	m.mediaState = &provider.VirtualMediaState{}
 	return nil
 }
 
-func (m *mockKVMClient) MountWithHTTP(_ context.Context, url, mode string) error {
-	if m.mountErr != nil {
-		return m.mountErr
+func (m *mockTestDriver) GetMediaState(_ context.Context) (*provider.VirtualMediaState, error) {
+	if m.mediaState == nil {
+		return &provider.VirtualMediaState{}, nil
 	}
-	m.virtualMedia = &client.VirtualMediaState{URL: url, Mode: mode}
+	return m.mediaState, nil
+}
+
+func (m *mockTestDriver) GetBMCVersion(_ context.Context) (string, error) {
+	return m.bmcVersion, nil
+}
+
+func (m *mockTestDriver) SetBootDevice(_ context.Context, device string, persistent, efiBoot bool) error {
+	m.bootDevice = device
 	return nil
 }
 
-func (m *mockKVMClient) UnmountImage(_ context.Context) error {
-	if m.unmountErr != nil {
-		return m.unmountErr
+func newTestDeviceManager() (*provider.DeviceManager, *mockTestDriver) {
+	dm := provider.NewDeviceManager()
+
+	mockDrv := &mockTestDriver{
+		powerState: "on",
+		bmcVersion: "1.0.0",
+		caps: []provider.Capability{
+			provider.CapPowerControl,
+			provider.CapVirtualMedia,
+			provider.CapBMCInfo,
+			provider.CapBootDevice,
+		},
 	}
-	m.virtualMedia = nil
-	return nil
+
+	dm.AddDevice(&provider.ManagedDevice{
+		Name:      "server-01",
+		MAC:       "AA:BB:CC:DD:EE:FF",
+		Providers: []provider.Provider{mockDrv},
+	})
+
+	return dm, mockDrv
 }
 
-func (m *mockKVMClient) GetVirtualMediaState(_ context.Context) (*client.VirtualMediaState, error) {
-	if m.virtualMedia == nil {
-		return &client.VirtualMediaState{}, nil
-	}
-	return m.virtualMedia, nil
-}
-
-func (m *mockKVMClient) GetVideoState(_ context.Context) (*client.VideoState, error) {
-	if m.videoState == nil {
-		return &client.VideoState{Width: 1920, Height: 1080}, nil
-	}
-	return m.videoState, nil
-}
-
-func (m *mockKVMClient) GetLocalVersion(_ context.Context) (*client.DeviceVersion, error) {
-	if m.deviceVersion == nil {
-		return &client.DeviceVersion{AppVersion: "0.5.0", SystemVersion: "1.0.0"}, nil
-	}
-	return m.deviceVersion, nil
-}
-
-func (m *mockKVMClient) TryUpdate(_ context.Context) error {
-	return nil
-}
-
-func (m *mockKVMClient) GetUSBState(_ context.Context) (any, error) {
-	return m.usbState, nil
-}
-
-func (m *mockKVMClient) SetJigglerState(_ context.Context, _ bool) error {
-	return nil
-}
-
-func (m *mockKVMClient) SendWOLMagicPacket(_ context.Context, _ string) error {
-	return nil
-}
-
-func (m *mockKVMClient) GetEDID(_ context.Context) (string, error) {
-	return m.edid, nil
-}
-
-func (m *mockKVMClient) SetEDID(_ context.Context, edid string) error {
-	m.edid = edid
-	return nil
-}
-
-func newTestService() (*rpcService, *mockKVMClient) {
+func newTestRPCService() (RpcService, *mockTestDriver) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	pool := client.NewPool(30)
+	dm, mockDrv := newTestDeviceManager()
+	svc := NewBMCService(dm, 30*time.Second, logger)
+	return svc, mockDrv
+}
 
-	mockClient := &mockKVMClient{
-		powerState:   client.PowerOn,
-		dcPowerState: true,
+func doRPC(t *testing.T, svc RpcService, device string, payload RequestPayload) *httptest.ResponseRecorder {
+	t.Helper()
+	body, _ := json.Marshal(payload)
+	req := httptest.NewRequest("POST", "/rpc", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	if device != "" {
+		req.Header.Set("X-Device", device)
 	}
-
-	svc := &rpcService{
-		pool:           pool,
-		defaultHost:    "192.168.1.100",
-		defaultPassword: "",
-		logger:         logger,
-	}
-
-	return svc, mockClient
+	w := httptest.NewRecorder()
+	svc.RpcHandler(w, req)
+	return w
 }
 
 func TestRpcHandler_Ping(t *testing.T) {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	cfg := config.Config{
-		Port:          5000,
-		Address:       "0.0.0.0",
-		DeviceHost:    "192.168.1.100",
-		WebRTCTimeout: 30,
-	}
-	svc := NewBMCService(cfg, logger)
+	svc, _ := newTestRPCService()
 
 	payload := RequestPayload{Method: PingMethod, ID: 1}
-	body, _ := json.Marshal(payload)
-	req := httptest.NewRequest("POST", "/", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-
-	svc.RpcHandler(w, req)
+	w := doRPC(t, svc, "", payload)
 
 	if w.Code != http.StatusOK {
 		t.Errorf("Expected status %d, got %d", http.StatusOK, w.Code)
@@ -209,18 +130,11 @@ func TestRpcHandler_Ping(t *testing.T) {
 }
 
 func TestRpcHandler_InvalidJSON(t *testing.T) {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	cfg := config.Config{
-		Port:          5000,
-		Address:       "0.0.0.0",
-		WebRTCTimeout: 30,
-	}
-	svc := NewBMCService(cfg, logger)
+	svc, _ := newTestRPCService()
 
-	req := httptest.NewRequest("POST", "/", bytes.NewReader([]byte("invalid json")))
+	req := httptest.NewRequest("POST", "/rpc", bytes.NewReader([]byte("invalid json")))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
-
 	svc.RpcHandler(w, req)
 
 	if w.Code != http.StatusBadRequest {
@@ -228,31 +142,157 @@ func TestRpcHandler_InvalidJSON(t *testing.T) {
 	}
 }
 
-func TestRpcHandler_UnknownMethod(t *testing.T) {
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelError}))
-	cfg := config.Config{
-		Port:          5000,
-		Address:       "0.0.0.0",
-		DeviceHost:    "192.168.1.100",
-		WebRTCTimeout: 1, // Short timeout for test — we only verify a connection error is returned.
+func TestRpcHandler_GetPowerState(t *testing.T) {
+	svc, _ := newTestRPCService()
+
+	payload := RequestPayload{Method: PowerGetMethod, ID: 1}
+	w := doRPC(t, svc, "server-01", payload)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status %d, got %d", http.StatusOK, w.Code)
 	}
-	svc := NewBMCService(cfg, logger)
 
-	payload := RequestPayload{Method: "unknownMethod", ID: 1}
-	body, _ := json.Marshal(payload)
-	req := httptest.NewRequest("POST", "/", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Device", "192.168.1.100")
-	w := httptest.NewRecorder()
-
-	svc.RpcHandler(w, req)
-
-	// This will fail because we can't actually connect to the device,
-	// but we can verify the handler processes the request.
 	var resp ResponsePayload
 	_ = json.Unmarshal(w.Body.Bytes(), &resp)
-	if resp.Error == nil && resp.Result == nil {
-		t.Error("Expected either error or result")
+	if resp.Result != "on" {
+		t.Errorf("Expected power state 'on', got %v", resp.Result)
+	}
+}
+
+func TestRpcHandler_SetPowerState(t *testing.T) {
+	svc, mockDrv := newTestRPCService()
+
+	payload := RequestPayload{
+		Method: PowerSetMethod,
+		ID:     2,
+		Params: map[string]interface{}{"state": "off"},
+	}
+	w := doRPC(t, svc, "server-01", payload)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status %d, got %d", http.StatusOK, w.Code)
+	}
+
+	if mockDrv.powerState != "off" {
+		t.Errorf("Expected power state 'off', got %q", mockDrv.powerState)
+	}
+}
+
+func TestRpcHandler_SetVirtualMedia(t *testing.T) {
+	svc, mockDrv := newTestRPCService()
+
+	payload := RequestPayload{
+		Method: VirtualMediaMethod,
+		ID:     3,
+		Params: map[string]interface{}{"mediaUrl": "http://example.com/boot.iso", "kind": "cdrom"},
+	}
+	w := doRPC(t, svc, "server-01", payload)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status %d, got %d", http.StatusOK, w.Code)
+	}
+
+	if mockDrv.mediaState == nil || mockDrv.mediaState.Image != "http://example.com/boot.iso" {
+		t.Error("Expected media to be mounted")
+	}
+}
+
+func TestRpcHandler_SetVirtualMedia_Unmount(t *testing.T) {
+	svc, mockDrv := newTestRPCService()
+	mockDrv.mediaState = &provider.VirtualMediaState{Inserted: true, Image: "http://example.com/boot.iso"}
+
+	payload := RequestPayload{
+		Method: VirtualMediaMethod,
+		ID:     4,
+		Params: map[string]interface{}{"mediaUrl": ""},
+	}
+	w := doRPC(t, svc, "server-01", payload)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status %d, got %d", http.StatusOK, w.Code)
+	}
+}
+
+func TestRpcHandler_BootDevice(t *testing.T) {
+	svc, mockDrv := newTestRPCService()
+
+	payload := RequestPayload{
+		Method: BootDeviceMethod,
+		ID:     5,
+		Params: map[string]interface{}{"device": "pxe", "persistent": false, "efiBoot": true},
+	}
+	w := doRPC(t, svc, "server-01", payload)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status %d, got %d", http.StatusOK, w.Code)
+	}
+
+	if mockDrv.bootDevice != "pxe" {
+		t.Errorf("Expected boot device 'pxe', got %q", mockDrv.bootDevice)
+	}
+}
+
+func TestRpcHandler_UnknownMethod(t *testing.T) {
+	svc, _ := newTestRPCService()
+
+	payload := RequestPayload{Method: "unknownMethod", ID: 6}
+	w := doRPC(t, svc, "server-01", payload)
+
+	var resp ResponsePayload
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp.Error == nil {
+		t.Error("Expected error for unknown method")
+	}
+}
+
+func TestRpcHandler_DeviceNotFound(t *testing.T) {
+	svc, _ := newTestRPCService()
+
+	payload := RequestPayload{Method: PowerGetMethod, ID: 7}
+	w := doRPC(t, svc, "nonexistent", payload)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("Expected status %d, got %d", http.StatusBadRequest, w.Code)
+	}
+}
+
+func TestRpcHandler_FallbackToHostField(t *testing.T) {
+	svc, _ := newTestRPCService()
+
+	// No X-Device header, but host field in body.
+	payload := RequestPayload{
+		Method: PowerGetMethod,
+		ID:     8,
+		Host:   "server-01",
+	}
+
+	body, _ := json.Marshal(payload)
+	req := httptest.NewRequest("POST", "/rpc", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	svc.RpcHandler(w, req)
+
+	var resp ResponsePayload
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp.Result != "on" {
+		t.Errorf("Expected power state 'on', got %v (error: %v)", resp.Result, resp.Error)
+	}
+}
+
+func TestRpcHandler_GetVersion(t *testing.T) {
+	svc, _ := newTestRPCService()
+
+	payload := RequestPayload{Method: GetVersionMethod, ID: 9}
+	w := doRPC(t, svc, "server-01", payload)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status %d, got %d", http.StatusOK, w.Code)
+	}
+
+	var resp ResponsePayload
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp.Result != "1.0.0" {
+		t.Errorf("Expected version '1.0.0', got %v", resp.Result)
 	}
 }
 

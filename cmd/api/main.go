@@ -10,8 +10,9 @@ import (
 
 	"github.com/jetkvm/cloud-api/mgmt-api/pkg/api"
 	"github.com/jetkvm/cloud-api/mgmt-api/pkg/config"
-	"github.com/jetkvm/cloud-api/mgmt-api/pkg/driver"
-	_ "github.com/jetkvm/cloud-api/mgmt-api/pkg/driver" // register drivers
+	"github.com/jetkvm/cloud-api/mgmt-api/pkg/provider"
+	_ "github.com/jetkvm/cloud-api/mgmt-api/pkg/providers/jetkvm" // register jetkvm provider
+	_ "github.com/jetkvm/cloud-api/mgmt-api/pkg/providers/unifi"  // register unifi provider
 	"github.com/spf13/cobra"
 )
 
@@ -52,30 +53,55 @@ func (rw *responseWriter) WriteHeader(code int) {
 	rw.ResponseWriter.WriteHeader(code)
 }
 
-func buildDeviceManager(cfg *config.Config, logger *slog.Logger) (*driver.DeviceManager, error) {
-	dm := driver.NewDeviceManager()
+func buildDeviceManager(cfg *config.Config, logger *slog.Logger) (*provider.DeviceManager, error) {
+	dm := provider.NewDeviceManager()
 
 	for i, devCfg := range cfg.Devices {
-		var drivers []driver.Driver
-		for j, drvCfg := range devCfg.Drivers {
-			drv, err := driver.Create(drvCfg.Type, drvCfg.ToMap())
-			if err != nil {
-				return nil, fmt.Errorf("device[%d].drivers[%d] (%s): %w", i, j, drvCfg.Type, err)
+		var providers []provider.Provider
+		for j, prvCfg := range devCfg.Providers {
+			prvMap := map[string]interface{}{
+				"type": prvCfg.Type,
+				"mac":  devCfg.MAC,
 			}
-			drivers = append(drivers, drv)
+			if prvCfg.Host != "" {
+				prvMap["host"] = prvCfg.Host
+			}
+			if prvCfg.Password != "" {
+				prvMap["password"] = prvCfg.Password
+			}
+			if prvCfg.SSHPort > 0 {
+				prvMap["ssh_port"] = prvCfg.SSHPort
+			}
+			if prvCfg.SSHUsername != "" {
+				prvMap["ssh_username"] = prvCfg.SSHUsername
+			}
+			// Provider-level ssh_key_path overrides global.
+			sshKeyPath := prvCfg.SSHKeyPath
+			if sshKeyPath == "" {
+				sshKeyPath = cfg.SSHKeyPath
+			}
+			if sshKeyPath != "" {
+				prvMap["ssh_key_path"] = sshKeyPath
+			}
 
-			logger.Info("registered driver",
+			prv, err := provider.Create(prvCfg.Type, prvMap)
+			if err != nil {
+				return nil, fmt.Errorf("device[%d].providers[%d] (%s): %w", i, j, prvCfg.Type, err)
+			}
+			providers = append(providers, prv)
+
+			logger.Info("registered provider",
 				slog.String("device", devCfg.MAC),
 				slog.String("name", devCfg.Name),
-				slog.String("driver", drvCfg.Type),
-				slog.String("host", drvCfg.Host),
+				slog.String("provider", prvCfg.Type),
+				slog.String("host", prvCfg.Host),
 			)
 		}
 
-		dev := &driver.ManagedDevice{
-			Name:    devCfg.Name,
-			MAC:     devCfg.MAC,
-			Drivers: drivers,
+		dev := &provider.ManagedDevice{
+			Name:      devCfg.Name,
+			MAC:       devCfg.MAC,
+			Providers: providers,
 		}
 		dm.AddDevice(dev)
 
@@ -98,10 +124,10 @@ var rootCmd = &cobra.Command{
 	Use:   "jetkvm-api",
 	Short: "JetKVM Management API - BMC-compatible Redfish and RPC server",
 	Long: `JetKVM Management API provides BMC-compatible Redfish and RPC endpoints
-for managing devices through pluggable drivers.
+for managing devices through pluggable providers.
 
 Configuration is provided via a YAML config file that defines managed devices,
-each with a MAC address, optional name, and one or more drivers.
+each with a MAC address, optional name, and one or more providers.
 
 Endpoints:
   POST /rpc                           - bmclib-compatible JSON-RPC
@@ -157,7 +183,7 @@ Example:
 
 		fmt.Printf("JetKVM Management API is running on http://%s:%d\n", cfg.Address, cfg.Port)
 		fmt.Printf("Registered %d device(s)\n", len(cfg.Devices))
-		fmt.Printf("Available drivers: %v\n", driver.Available())
+		fmt.Printf("Available providers: %v\n", provider.Available())
 		fmt.Printf("Endpoints:\n")
 		fmt.Printf("  POST /rpc                  - bmclib-compatible JSON-RPC\n")
 		fmt.Printf("  GET  /redfish/v1/           - Redfish Service Root\n")

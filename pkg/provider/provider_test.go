@@ -1,34 +1,34 @@
-package driver
+package provider
 
 import (
 	"context"
 	"testing"
 )
 
-// mockDriver implements Driver + PowerController + VirtualMediaController + BMCInfoProvider for testing.
-type mockDriver struct {
-	name         string
-	caps         []Capability
-	powerState   string
-	mediaState   *VirtualMediaState
-	bmcVersion   string
-	openErr      error
-	closeErr     error
-	setPowerErr  error
-	mountErr     error
-	unmountErr   error
+// mockProvider implements Provider + PowerController + VirtualMediaController + BMCInfoProvider for testing.
+type mockProvider struct {
+	name        string
+	caps        []Capability
+	powerState  string
+	mediaState  *VirtualMediaState
+	bmcVersion  string
+	openErr     error
+	closeErr    error
+	setPowerErr error
+	mountErr    error
+	unmountErr  error
 }
 
-func (m *mockDriver) Name() string                { return m.name }
-func (m *mockDriver) Capabilities() []Capability   { return m.caps }
-func (m *mockDriver) Open(_ context.Context) error { return m.openErr }
-func (m *mockDriver) Close() error                 { return m.closeErr }
+func (m *mockProvider) Name() string                { return m.name }
+func (m *mockProvider) Capabilities() []Capability   { return m.caps }
+func (m *mockProvider) Open(_ context.Context) error { return m.openErr }
+func (m *mockProvider) Close() error                 { return m.closeErr }
 
-func (m *mockDriver) GetPowerState(_ context.Context) (string, error) {
+func (m *mockProvider) GetPowerState(_ context.Context) (string, error) {
 	return m.powerState, nil
 }
 
-func (m *mockDriver) SetPowerState(_ context.Context, state string) error {
+func (m *mockProvider) SetPowerState(_ context.Context, state string) error {
 	if m.setPowerErr != nil {
 		return m.setPowerErr
 	}
@@ -36,7 +36,7 @@ func (m *mockDriver) SetPowerState(_ context.Context, state string) error {
 	return nil
 }
 
-func (m *mockDriver) MountMedia(_ context.Context, url, kind string) error {
+func (m *mockProvider) MountMedia(_ context.Context, url, kind string) error {
 	if m.mountErr != nil {
 		return m.mountErr
 	}
@@ -44,7 +44,7 @@ func (m *mockDriver) MountMedia(_ context.Context, url, kind string) error {
 	return nil
 }
 
-func (m *mockDriver) UnmountMedia(_ context.Context) error {
+func (m *mockProvider) UnmountMedia(_ context.Context) error {
 	if m.unmountErr != nil {
 		return m.unmountErr
 	}
@@ -52,31 +52,31 @@ func (m *mockDriver) UnmountMedia(_ context.Context) error {
 	return nil
 }
 
-func (m *mockDriver) GetMediaState(_ context.Context) (*VirtualMediaState, error) {
+func (m *mockProvider) GetMediaState(_ context.Context) (*VirtualMediaState, error) {
 	if m.mediaState == nil {
 		return &VirtualMediaState{}, nil
 	}
 	return m.mediaState, nil
 }
 
-func (m *mockDriver) GetBMCVersion(_ context.Context) (string, error) {
+func (m *mockProvider) GetBMCVersion(_ context.Context) (string, error) {
 	return m.bmcVersion, nil
 }
 
 func TestHasCapability(t *testing.T) {
-	d := &mockDriver{
+	p := &mockProvider{
 		name: "test",
 		caps: []Capability{CapPowerControl, CapVirtualMedia},
 	}
 
-	if !HasCapability(d, CapPowerControl) {
-		t.Error("expected driver to have CapPowerControl")
+	if !HasCapability(p, CapPowerControl) {
+		t.Error("expected provider to have CapPowerControl")
 	}
-	if !HasCapability(d, CapVirtualMedia) {
-		t.Error("expected driver to have CapVirtualMedia")
+	if !HasCapability(p, CapVirtualMedia) {
+		t.Error("expected provider to have CapVirtualMedia")
 	}
-	if HasCapability(d, CapBootDevice) {
-		t.Error("expected driver to NOT have CapBootDevice")
+	if HasCapability(p, CapBootDevice) {
+		t.Error("expected provider to NOT have CapBootDevice")
 	}
 }
 
@@ -110,9 +110,9 @@ func TestManagedDevice_ID(t *testing.T) {
 func TestManagedDevice_HasCapability(t *testing.T) {
 	dev := &ManagedDevice{
 		MAC: "AA:BB:CC:DD:EE:FF",
-		Drivers: []Driver{
-			&mockDriver{name: "a", caps: []Capability{CapPowerControl}},
-			&mockDriver{name: "b", caps: []Capability{CapVirtualMedia}},
+		Providers: []Provider{
+			&mockProvider{name: "a", caps: []Capability{CapPowerControl}},
+			&mockProvider{name: "b", caps: []Capability{CapVirtualMedia}},
 		},
 	}
 
@@ -130,9 +130,9 @@ func TestManagedDevice_HasCapability(t *testing.T) {
 func TestManagedDevice_MergedCapabilities(t *testing.T) {
 	dev := &ManagedDevice{
 		MAC: "AA:BB:CC:DD:EE:FF",
-		Drivers: []Driver{
-			&mockDriver{name: "a", caps: []Capability{CapPowerControl, CapVirtualMedia}},
-			&mockDriver{name: "b", caps: []Capability{CapVirtualMedia, CapBMCInfo}},
+		Providers: []Provider{
+			&mockProvider{name: "a", caps: []Capability{CapPowerControl, CapVirtualMedia}},
+			&mockProvider{name: "b", caps: []Capability{CapVirtualMedia, CapBMCInfo}},
 		},
 	}
 
@@ -150,7 +150,7 @@ func TestManagedDevice_MergedCapabilities(t *testing.T) {
 }
 
 func TestManagedDevice_Controllers(t *testing.T) {
-	drv := &mockDriver{
+	prv := &mockProvider{
 		name:       "test",
 		caps:       []Capability{CapPowerControl, CapVirtualMedia, CapBMCInfo},
 		powerState: "on",
@@ -158,8 +158,8 @@ func TestManagedDevice_Controllers(t *testing.T) {
 	}
 
 	dev := &ManagedDevice{
-		MAC:     "AA:BB:CC:DD:EE:FF",
-		Drivers: []Driver{drv},
+		MAC:       "AA:BB:CC:DD:EE:FF",
+		Providers: []Provider{prv},
 	}
 
 	if pc := dev.PowerController(); pc == nil {
@@ -225,14 +225,14 @@ func TestDeviceManager_FindDevice(t *testing.T) {
 	dev1 := &ManagedDevice{
 		Name: "server-01",
 		MAC:  "AA:BB:CC:DD:EE:FF",
-		Drivers: []Driver{
-			&mockDriver{name: "test", caps: []Capability{CapPowerControl}},
+		Providers: []Provider{
+			&mockProvider{name: "test", caps: []Capability{CapPowerControl}},
 		},
 	}
 	dev2 := &ManagedDevice{
 		MAC: "11:22:33:44:55:66",
-		Drivers: []Driver{
-			&mockDriver{name: "test", caps: []Capability{CapVirtualMedia}},
+		Providers: []Provider{
+			&mockProvider{name: "test", caps: []Capability{CapVirtualMedia}},
 		},
 	}
 
@@ -284,8 +284,8 @@ func TestDeviceManager_AllDevices(t *testing.T) {
 func TestRegistry(t *testing.T) {
 	reg := NewRegistry()
 
-	reg.Register("mock", func(cfg map[string]interface{}) (Driver, error) {
-		return &mockDriver{name: "mock", caps: []Capability{CapPowerControl}}, nil
+	reg.Register("mock", func(cfg map[string]interface{}) (Provider, error) {
+		return &mockProvider{name: "mock", caps: []Capability{CapPowerControl}}, nil
 	})
 
 	avail := reg.Available()
@@ -293,22 +293,22 @@ func TestRegistry(t *testing.T) {
 		t.Errorf("expected [mock], got %v", avail)
 	}
 
-	drv, err := reg.Create("mock", nil)
+	prv, err := reg.Create("mock", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if drv.Name() != "mock" {
-		t.Errorf("expected driver name 'mock', got %q", drv.Name())
+	if prv.Name() != "mock" {
+		t.Errorf("expected provider name 'mock', got %q", prv.Name())
 	}
 
 	_, err = reg.Create("nonexistent", nil)
 	if err == nil {
-		t.Error("expected error for nonexistent driver")
+		t.Error("expected error for nonexistent provider")
 	}
 }
 
-func TestDriverConfig_ToMap(t *testing.T) {
-	cfg := &DriverConfig{
+func TestProviderConfig_ToMap(t *testing.T) {
+	cfg := &ProviderConfig{
 		Type:     "jetkvm",
 		Host:     "192.168.1.100",
 		Password: "secret",
@@ -326,8 +326,8 @@ func TestDriverConfig_ToMap(t *testing.T) {
 	}
 }
 
-func TestDriverConfig_ToMap_Empty(t *testing.T) {
-	cfg := &DriverConfig{Type: "mock"}
+func TestProviderConfig_ToMap_Empty(t *testing.T) {
+	cfg := &ProviderConfig{Type: "mock"}
 	m := cfg.ToMap()
 	if _, ok := m["host"]; ok {
 		t.Error("expected no 'host' key for empty host")
