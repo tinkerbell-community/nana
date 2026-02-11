@@ -1,0 +1,136 @@
+// Package config provides configuration management for the JetKVM management API,
+// supporting CLI flags, environment variables, and YAML config files via Viper.
+//
+// The configuration defines server settings and a list of managed devices,
+// each with a MAC address, optional name, and one or more BMC drivers.
+package config
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
+)
+
+// Config holds the server and device configuration.
+type Config struct {
+	// Server settings.
+	Port    int    `mapstructure:"port" yaml:"port"`
+	Address string `mapstructure:"address" yaml:"address"`
+
+	// WebRTC settings (used by JetKVM driver).
+	WebRTCTimeout int `mapstructure:"webrtc_timeout" yaml:"webrtc_timeout"`
+
+	// Managed devices.
+	Devices []DeviceConfig `mapstructure:"devices" yaml:"devices"`
+}
+
+// DeviceConfig holds configuration for a managed BMC device.
+type DeviceConfig struct {
+	// Name is an optional human-readable identifier for the device.
+	// Used as the primary Redfish system ID when present.
+	Name string `mapstructure:"name" yaml:"name"`
+
+	// MAC is the device's MAC address (required). Used as a fallback system ID
+	// and as the canonical device identifier.
+	MAC string `mapstructure:"mac" yaml:"mac"`
+
+	// Drivers lists the BMC drivers that provide capabilities for this device.
+	Drivers []DriverConfig `mapstructure:"drivers" yaml:"drivers"`
+}
+
+// DriverConfig holds configuration for a single driver instance.
+type DriverConfig struct {
+	// Type is the driver type name (e.g., "jetkvm").
+	Type string `mapstructure:"type" yaml:"type"`
+
+	// Host is the driver's target hostname or IP address.
+	Host string `mapstructure:"host" yaml:"host"`
+
+	// Password is the optional authentication credential.
+	Password string `mapstructure:"password" yaml:"password"`
+}
+
+var (
+	cfgFile string
+	cfg     *Config
+)
+
+// InitConfig reads in config file and ENV variables if set.
+func InitConfig() {
+	if cfgFile != "" {
+		viper.SetConfigFile(cfgFile)
+	} else {
+		viper.AddConfigPath("$HOME")
+		viper.AddConfigPath(".")
+		viper.SetConfigType("yaml")
+		viper.SetConfigName("jetkvm-api")
+	}
+
+	viper.SetEnvPrefix("JETKVM_API")
+	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_", "-", "_"))
+	viper.AutomaticEnv()
+
+	// Defaults.
+	viper.SetDefault("port", 5000)
+	viper.SetDefault("address", "0.0.0.0")
+	viper.SetDefault("webrtc_timeout", 30)
+
+	if err := viper.ReadInConfig(); err == nil {
+		fmt.Println("Using config file:", viper.ConfigFileUsed())
+	}
+}
+
+// InitFlags binds CLI flags to Viper configuration keys.
+func InitFlags(cmd *cobra.Command) {
+	cmd.PersistentFlags().StringVar(&cfgFile, "config", "", "Config file path (default: ./jetkvm-api.yaml)")
+	cmd.Flags().Int("port", 5000, "HTTP server port")
+	cmd.Flags().String("address", "0.0.0.0", "HTTP server bind address")
+	cmd.Flags().Int("webrtc-timeout", 30, "WebRTC connection timeout in seconds")
+
+	_ = viper.BindPFlag("port", cmd.Flags().Lookup("port"))
+	_ = viper.BindPFlag("address", cmd.Flags().Lookup("address"))
+	_ = viper.BindPFlag("webrtc_timeout", cmd.Flags().Lookup("webrtc-timeout"))
+}
+
+// LoadConfig unmarshals the Viper config into a Config struct and validates it.
+func LoadConfig() (*Config, error) {
+	var c Config
+	if err := viper.Unmarshal(&c); err != nil {
+		return nil, fmt.Errorf("unable to decode config: %w", err)
+	}
+	if err := validateConfig(&c); err != nil {
+		return nil, err
+	}
+	cfg = &c
+	return &c, nil
+}
+
+// GetConfig returns the loaded configuration.
+func GetConfig() *Config {
+	return cfg
+}
+
+func validateConfig(config *Config) error {
+	if config.Port < 1 || config.Port > 65535 {
+		return fmt.Errorf("invalid server port: %d (must be 1-65535)", config.Port)
+	}
+	if config.WebRTCTimeout < 1 {
+		return fmt.Errorf("webrtc_timeout must be a positive integer")
+	}
+	for i, dev := range config.Devices {
+		if dev.MAC == "" {
+			return fmt.Errorf("device[%d]: mac address is required", i)
+		}
+		if len(dev.Drivers) == 0 {
+			return fmt.Errorf("device[%d] (%s): at least one driver is required", i, dev.MAC)
+		}
+		for j, drv := range dev.Drivers {
+			if drv.Type == "" {
+				return fmt.Errorf("device[%d].drivers[%d]: driver type is required", i, j)
+			}
+		}
+	}
+	return nil
+}

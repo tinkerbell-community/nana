@@ -1,0 +1,36 @@
+# Server settings
+port: 5000
+address: "0.0.0.0"
+
+# WebRTC connection timeout (seconds)
+webrtc_timeout: 30
+
+# Managed devices
+# Each device requires a MAC address and at least one driver.
+# The 'name' field is optional but recommended — it becomes the primary
+# Redfish system ID. If omitted, the MAC address is used instead.
+#
+# Multiple drivers can be specified per device. Capabilities from all
+# drivers are merged, so if one driver provides power control and another
+# provides virtual media, both features are available via Redfish and RPC.
+devices:
+  - name: "server-01"
+    mac: "AA:BB:CC:DD:EE:FF"
+    drivers:
+      - type: "jetkvm"
+        host: "192.168.1.100"
+        password: ""
+
+  - name: "server-02"
+    mac: "11:22:33:44:55:66"
+    drivers:
+      - type: "jetkvm"
+        host: "192.168.1.101"
+        password: "secret"
+
+  # Example: device identified only by MAC (no name).
+  # Redfish system ID will be "AA-BB-CC-DD-EE-01".
+  # - mac: "AA:BB:CC:DD:EE:01"
+  #   drivers:
+  #     - type: "jetkvm"
+  #       host: "192.168.1.102"

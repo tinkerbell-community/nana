@@ -1,0 +1,25 @@
+version: 2
+project_name: jetkvm-api
+env:
+  - REPO={{.GitURL | trimprefix "https://github.com/" | trimsuffix ".git"}}
+before:
+  hooks:
+    - go mod tidy
+builds:
+  - env: ["CGO_ENABLED=0"]
+    main: ./cmd/api
+    binary: jetkvm-api
+    goos: [linux]
+    goarch: [amd64, arm64]
+kos:
+  - repositories:
+      - "ghcr.io/{{.Env.REPO}}"
+      - "{{.Env.REPO}}"
+    tags:
+      [latest, "{{.ShortCommit}}", "{{if not .IsSnapshot}}{{.Version}}{{end}}"]
+    bare: true
+    preserve_import_paths: false
+    platforms: [linux/amd64, linux/arm64]
+    disable: false
+    base_image: docker.io/chainguard/static
+    local_domain: "ghcr.io/jetkvm/cloud-api/mgmt-api"
