@@ -15,7 +15,7 @@ func (p *Provider) MountMedia(ctx context.Context, url, kind string) error {
 	if kind == "" {
 		kind = "cdrom"
 	}
-	return p.kvmClient.MountWithHTTP(ctx, url, kind)
+	return p.c.MountWithHTTP(ctx, url, kind)
 }
 
 // UnmountMedia unmounts any currently mounted virtual media.
@@ -23,7 +23,7 @@ func (p *Provider) UnmountMedia(ctx context.Context) error {
 	if err := p.ensureConnected(ctx); err != nil {
 		return fmt.Errorf("failed to connect to JetKVM: %w", err)
 	}
-	return p.kvmClient.UnmountImage(ctx)
+	return p.c.UnmountImage(ctx)
 }
 
 // GetMediaState returns the current virtual media state.
@@ -31,7 +31,7 @@ func (p *Provider) GetMediaState(ctx context.Context) (*providers.VirtualMediaSt
 	if err := p.ensureConnected(ctx); err != nil {
 		return nil, fmt.Errorf("failed to connect to JetKVM: %w", err)
 	}
-	state, err := p.kvmClient.GetVirtualMediaState(ctx)
+	state, err := p.c.GetVirtualMediaState(ctx)
 	if err != nil {
 		return nil, err
 	}

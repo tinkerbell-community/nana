@@ -16,11 +16,11 @@ import (
 
 // Provider implements the providers.Provider interface for JetKVM devices.
 type Provider struct {
-	kvmClient *client.Client
-	host      string
-	password  string
-	timeout   time.Duration
-	logger    *slog.Logger
+	c        *client.Client
+	host     string
+	password string
+	timeout  time.Duration
+	logger   *slog.Logger
 }
 
 func init() {
@@ -49,11 +49,11 @@ func newProvider(cfg map[string]any) (providers.Provider, error) {
 	}
 
 	return &Provider{
-		kvmClient: c,
-		host:      host,
-		password:  password,
-		timeout:   timeout,
-		logger:    slog.Default(),
+		c:        c,
+		host:     host,
+		password: password,
+		timeout:  timeout,
+		logger:   slog.Default(),
 	}, nil
 }
 
@@ -71,18 +71,18 @@ func (p *Provider) Capabilities() []providers.Capability {
 
 // Open initializes the WebRTC connection to the JetKVM device.
 func (p *Provider) Open(ctx context.Context) error {
-	return p.kvmClient.Connect(ctx)
+	return p.c.Connect(ctx)
 }
 
 // ensureConnected lazily establishes the WebRTC connection if not already open.
 // It is safe to call on every operation — Connect is idempotent when connected.
 func (p *Provider) ensureConnected(ctx context.Context) error {
-	return p.kvmClient.Connect(ctx)
+	return p.c.Connect(ctx)
 }
 
 // Close releases the WebRTC connection.
 func (p *Provider) Close() error {
-	return p.kvmClient.Close()
+	return p.c.Close()
 }
 
 // Compile-time interface checks.

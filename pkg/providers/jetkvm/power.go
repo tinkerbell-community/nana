@@ -11,7 +11,7 @@ func (p *Provider) GetPowerState(ctx context.Context) (string, error) {
 	if err := p.ensureConnected(ctx); err != nil {
 		return "", fmt.Errorf("failed to connect to JetKVM: %w", err)
 	}
-	state, err := p.kvmClient.GetPowerState(ctx)
+	state, err := p.c.GetPowerState(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -23,7 +23,7 @@ func (p *Provider) SetPowerState(ctx context.Context, state string) error {
 	if err := p.ensureConnected(ctx); err != nil {
 		return fmt.Errorf("failed to connect to JetKVM: %w", err)
 	}
-	if err := p.kvmClient.SetPowerState(ctx, state); err != nil {
+	if err := p.c.SetPowerState(ctx, state); err != nil {
 		return err
 	}
 
@@ -36,7 +36,7 @@ func (p *Provider) SetPowerState(ctx context.Context, state string) error {
 
 // sendWakeOnLan retrieves configured WOL devices and sends magic packets for each.
 func (p *Provider) sendWakeOnLan(ctx context.Context) {
-	devices, err := p.kvmClient.GetWakeOnLanDevices(ctx)
+	devices, err := p.c.GetWakeOnLanDevices(ctx)
 	if err != nil {
 		p.logger.Warn(
 			"failed to get WOL devices",
@@ -47,7 +47,7 @@ func (p *Provider) sendWakeOnLan(ctx context.Context) {
 	}
 
 	for _, dev := range devices {
-		if err := p.kvmClient.SendWOLMagicPacket(ctx, dev.MacAddress); err != nil {
+		if err := p.c.SendWOLMagicPacket(ctx, dev.MacAddress); err != nil {
 			p.logger.Warn("failed to send WOL packet",
 				slog.String("host", p.host),
 				slog.String("mac", dev.MacAddress),
