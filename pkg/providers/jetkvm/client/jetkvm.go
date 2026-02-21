@@ -62,8 +62,19 @@ type ATXState struct {
 	HDDLED   bool `json:"hddLED"`
 }
 
+// DCPowerState represents the DC power state returned by JetKVM.
+type DCPowerState struct {
+	IsOn         bool    `json:"isOn"`
+	Voltage      float64 `json:"voltage"`
+	Current      float64 `json:"current"`
+	Power        float64 `json:"power"`
+	RestoreState int     `json:"restoreState"`
+}
+
 // VideoState represents the video capture state of JetKVM.
 type VideoState struct {
+	Ready  bool   `json:"ready"`
+	Error  string `json:"error"`
 	Width  int    `json:"width"`
 	Height int    `json:"height"`
 	Source string `json:"source"`
@@ -587,20 +598,25 @@ func (c *Client) handleDataChannelMessage(msg webrtc.DataChannelMessage) {
 // --- High-Level Power Management ---
 
 // GetDCPowerState returns the DC power state from the JetKVM device.
-func (c *Client) GetDCPowerState(ctx context.Context) (bool, error) {
+func (c *Client) GetDCPowerState(ctx context.Context) (*DCPowerState, error) {
 	resp, err := c.Call(ctx, "getDCPowerState", nil)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	if resp.Error != nil {
-		return false, fmt.Errorf("RPC error: %v", resp.Error)
+		return nil, fmt.Errorf("RPC error: %v", resp.Error)
 	}
 
-	enabled, ok := resp.Result.(bool)
-	if !ok {
-		return false, fmt.Errorf("unexpected result type: %T", resp.Result)
+	data, err := json.Marshal(resp.Result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal result: %w", err)
 	}
-	return enabled, nil
+
+	var state DCPowerState
+	if err := json.Unmarshal(data, &state); err != nil {
+		return nil, fmt.Errorf("failed to parse DC power state: %w", err)
+	}
+	return &state, nil
 }
 
 // SetDCPowerState sets the DC power state on the JetKVM device.
@@ -709,7 +725,7 @@ func (c *Client) GetPowerState(ctx context.Context) (PowerState, error) {
 		if err != nil {
 			return PowerUnknown, fmt.Errorf("failed to get DC power state: %w", err)
 		}
-		if dcState {
+		if dcState.IsOn {
 			return PowerOn, nil
 		}
 		return PowerOff, nil
@@ -719,7 +735,23 @@ func (c *Client) GetPowerState(ctx context.Context) (PowerState, error) {
 	}
 }
 
-// SetPowerState sets the power state based on the active extension.
+// powerStatePollInterval is how often SetPowerState polls for the desired state.
+const powerStatePollInterval = 1 * time.Second
+
+// desiredPowerState maps a power action string to the expected final PowerState.
+func desiredPowerState(action string) PowerState {
+	switch action {
+	case "on", "cycle", "reset":
+		return PowerOn
+	case "off":
+		return PowerOff
+	default:
+		return PowerUnknown
+	}
+}
+
+// SetPowerState sets the power state based on the active extension and waits
+// for the state to transition to the desired value.
 func (c *Client) SetPowerState(ctx context.Context, state string) error {
 	ext, err := c.GetActiveExtension(ctx)
 	if err != nil {
@@ -728,11 +760,43 @@ func (c *Client) SetPowerState(ctx context.Context, state string) error {
 
 	switch ext {
 	case "atx-power":
-		return c.setATXPowerState(ctx, state)
+		if err := c.setATXPowerState(ctx, state); err != nil {
+			return err
+		}
 	case "dc-power":
-		return c.setDCPowerState(ctx, state)
+		if err := c.setDCPowerState(ctx, state); err != nil {
+			return err
+		}
 	default:
 		return fmt.Errorf("no supported power extension active: %q", ext)
+	}
+
+	return c.waitForPowerState(ctx, desiredPowerState(state))
+}
+
+// waitForPowerState polls GetPowerState until it matches the desired state
+// or the context is cancelled.
+func (c *Client) waitForPowerState(ctx context.Context, desired PowerState) error {
+	if desired == PowerUnknown {
+		return nil
+	}
+
+	ticker := time.NewTicker(powerStatePollInterval)
+	defer ticker.Stop()
+
+	for {
+		current, err := c.GetPowerState(ctx)
+		if err != nil {
+			c.logger.Debug("failed to poll power state", slog.String("error", err.Error()))
+		} else if current == desired {
+			return nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("timed out waiting for power state %s: %w", desired, ctx.Err())
+		case <-ticker.C:
+		}
 	}
 }
 
@@ -872,16 +936,18 @@ func (c *Client) TryUpdate(ctx context.Context) error {
 
 // --- USB ---
 
-// GetUSBState returns the current USB emulation state.
-func (c *Client) GetUSBState(ctx context.Context) (any, error) {
+// GetUSBState returns the current USB emulation state as a string.
+// Possible values: "configured", "attached", "not attached", "suspended", "addressed".
+func (c *Client) GetUSBState(ctx context.Context) (string, error) {
 	resp, err := c.Call(ctx, "getUSBState", nil)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	if resp.Error != nil {
-		return nil, fmt.Errorf("RPC error: %v", resp.Error)
+		return "", fmt.Errorf("RPC error: %v", resp.Error)
 	}
-	return resp.Result, nil
+	state, _ := resp.Result.(string)
+	return state, nil
 }
 
 // SetJigglerState enables or disables the mouse jiggler.

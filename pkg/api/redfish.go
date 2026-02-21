@@ -518,9 +518,7 @@ func redfishResetToDriverState(resetType string) string {
 	switch resetType {
 	case "On", "ForceOn":
 		return "on"
-	case "ForceOff":
-		return "off"
-	case "GracefulShutdown":
+	case "ForceOff", "GracefulShutdown":
 		return "off"
 	case "ForceRestart", "GracefulRestart":
 		return "cycle"

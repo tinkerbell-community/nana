@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"log/slog"
 	"net/http"
 	"time"
@@ -23,12 +22,12 @@ type rpcService struct {
 	logger     *slog.Logger
 }
 
-func writeError(w http.ResponseWriter, statusCode int, message string) {
+func writeError(logger *slog.Logger, w http.ResponseWriter, statusCode int, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
 	err := json.NewEncoder(w).Encode(map[string]string{"error": message})
 	if err != nil {
-		log.Printf("error writing error response: %v", err)
+		logger.Error("error writing error response", "error", err.Error())
 	}
 }
 
@@ -92,7 +91,7 @@ func (s *rpcService) RpcHandler(w http.ResponseWriter, r *http.Request) {
 
 	req := RequestPayload{}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "Invalid JSON payload")
+		writeError(s.logger, w, http.StatusBadRequest, "Invalid JSON payload")
 		return
 	}
 
@@ -104,7 +103,7 @@ func (s *rpcService) RpcHandler(w http.ResponseWriter, r *http.Request) {
 	// Methods that don't require a device connection.
 	if req.Method == PingMethod {
 		rp.Result = "pong"
-		writeResponse(w, rp)
+		writeResponse(s.logger, w, rp)
 		return
 	}
 
@@ -118,7 +117,7 @@ func (s *rpcService) RpcHandler(w http.ResponseWriter, r *http.Request) {
 		dev, err = s.getDeviceByHost(req.Host)
 	}
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
+		writeError(s.logger, w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -360,10 +359,10 @@ func (s *rpcService) RpcHandler(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeResponse(w, rp)
+	writeResponse(s.logger, w, rp)
 }
 
-func writeResponse(w http.ResponseWriter, rp ResponsePayload) {
+func writeResponse(logger *slog.Logger, w http.ResponseWriter, rp ResponsePayload) {
 	w.Header().Set("Content-Type", "application/json")
 	if rp.Error != nil {
 		w.WriteHeader(rp.Error.Code)
@@ -372,7 +371,7 @@ func writeResponse(w http.ResponseWriter, rp ResponsePayload) {
 	}
 
 	if err := json.NewEncoder(w).Encode(rp); err != nil {
-		log.Printf("error encoding response: %v", err)
+		logger.Error("error encoding response", "error", err)
 	}
 }
 

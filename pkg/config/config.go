@@ -22,6 +22,11 @@ type Config struct {
 	// WebRTC settings (used by JetKVM driver).
 	WebRTCTimeout int `mapstructure:"webrtc_timeout" yaml:"webrtc_timeout"`
 
+	// Go runtime tuning.
+	MaxprocsEnable bool    `mapstructure:"maxprocs_enable" yaml:"maxprocs_enable"`
+	MemlimitEnable bool    `mapstructure:"memlimit_enable" yaml:"memlimit_enable"`
+	MemlimitRatio  float64 `mapstructure:"memlimit_ratio"  yaml:"memlimit_ratio"`
+
 	// Managed devices.
 	Devices []DeviceConfig `mapstructure:"devices" yaml:"devices"`
 }
@@ -100,6 +105,9 @@ func InitConfig() {
 	viper.SetDefault("port", 5000)
 	viper.SetDefault("address", "0.0.0.0")
 	viper.SetDefault("webrtc_timeout", 30)
+	viper.SetDefault("maxprocs_enable", true)
+	viper.SetDefault("memlimit_enable", true)
+	viper.SetDefault("memlimit_ratio", 0.9)
 
 	if err := viper.ReadInConfig(); err == nil {
 		fmt.Println("Using config file:", viper.ConfigFileUsed())

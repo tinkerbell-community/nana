@@ -48,4 +48,5 @@ website/vendor
 /scripts
 
 # Build
-mgmt-api
+/mgmt-api
+/api

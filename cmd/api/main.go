@@ -6,14 +6,17 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
+	"github.com/KimMachineGun/automemlimit/memlimit"
 	"github.com/jetkvm/cloud-api/mgmt-api/pkg/api"
 	"github.com/jetkvm/cloud-api/mgmt-api/pkg/config"
 	"github.com/jetkvm/cloud-api/mgmt-api/pkg/providers"
 	_ "github.com/jetkvm/cloud-api/mgmt-api/pkg/providers/jetkvm" // register jetkvm provider
 	_ "github.com/jetkvm/cloud-api/mgmt-api/pkg/providers/unifi"  // register unifi provider
 	"github.com/spf13/cobra"
+	"go.uber.org/automaxprocs/maxprocs"
 )
 
 func loggingMiddleware(logger *slog.Logger) func(http.Handler) http.Handler {
@@ -176,6 +179,47 @@ Example:
 		cfg, err := config.LoadConfig()
 		if err != nil {
 			log.Fatalf("Error loading configuration: %v", err)
+		}
+
+		// Set Go runtime parameters before we get too far into initialization.
+		if cfg.MaxprocsEnable {
+			l := func(format string, a ...any) {
+				logger.Info(
+					fmt.Sprintf(strings.TrimPrefix(format, "maxprocs: "), a...),
+					"component",
+					"automaxprocs",
+				)
+			}
+			if _, err := maxprocs.Set(maxprocs.Logger(l)); err != nil {
+				logger.Warn(
+					"Failed to set GOMAXPROCS automatically",
+					"component",
+					"automaxprocs",
+					"err",
+					err,
+				)
+			}
+		}
+
+		if cfg.MemlimitEnable {
+			if _, err := memlimit.SetGoMemLimitWithOpts(
+				memlimit.WithRatio(cfg.MemlimitRatio),
+				memlimit.WithProvider(
+					memlimit.ApplyFallback(
+						memlimit.FromCgroup,
+						memlimit.FromSystem,
+					),
+				),
+				memlimit.WithLogger(slog.Default().With("component", "automemlimit")),
+			); err != nil {
+				logger.Warn(
+					"Failed to set GOMEMLIMIT automatically",
+					"component",
+					"automemlimit",
+					"err",
+					err,
+				)
+			}
 		}
 
 		dm, err := buildDeviceManager(cfg, logger)
