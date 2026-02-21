@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/jetkvm/cloud-api/mgmt-api/pkg/provider"
+	"github.com/jetkvm/cloud-api/mgmt-api/pkg/providers"
 )
 
 // RedfishService provides Redfish v1 REST API endpoints.
@@ -35,11 +35,11 @@ type RedfishService interface {
 }
 
 type redfishService struct {
-	dm *provider.DeviceManager
+	dm *providers.DeviceManager
 }
 
 // NewRedfishService creates a new Redfish API service.
-func NewRedfishService(dm *provider.DeviceManager) RedfishService {
+func NewRedfishService(dm *providers.DeviceManager) RedfishService {
 	return &redfishService{dm: dm}
 }
 
@@ -48,11 +48,20 @@ func RegisterRedfishRoutes(mux *http.ServeMux, svc RedfishService) {
 	mux.HandleFunc("GET /redfish/v1/", svc.ServiceRoot)
 	mux.HandleFunc("GET /redfish/v1/Systems", svc.Systems)
 	mux.HandleFunc("GET /redfish/v1/Systems/{systemId}", svc.System)
-	mux.HandleFunc("POST /redfish/v1/Systems/{systemId}/Actions/ComputerSystem.Reset", svc.SystemReset)
+	mux.HandleFunc(
+		"POST /redfish/v1/Systems/{systemId}/Actions/ComputerSystem.Reset",
+		svc.SystemReset,
+	)
 	mux.HandleFunc("GET /redfish/v1/Systems/{systemId}/VirtualMedia", svc.VirtualMediaCollection)
 	mux.HandleFunc("GET /redfish/v1/Systems/{systemId}/VirtualMedia/{vmId}", svc.VirtualMedia)
-	mux.HandleFunc("POST /redfish/v1/Systems/{systemId}/VirtualMedia/{vmId}/Actions/VirtualMedia.InsertMedia", svc.VirtualMediaInsert)
-	mux.HandleFunc("POST /redfish/v1/Systems/{systemId}/VirtualMedia/{vmId}/Actions/VirtualMedia.EjectMedia", svc.VirtualMediaEject)
+	mux.HandleFunc(
+		"POST /redfish/v1/Systems/{systemId}/VirtualMedia/{vmId}/Actions/VirtualMedia.InsertMedia",
+		svc.VirtualMediaInsert,
+	)
+	mux.HandleFunc(
+		"POST /redfish/v1/Systems/{systemId}/VirtualMedia/{vmId}/Actions/VirtualMedia.EjectMedia",
+		svc.VirtualMediaEject,
+	)
 	mux.HandleFunc("GET /redfish/v1/Managers", svc.Managers)
 	mux.HandleFunc("GET /redfish/v1/Managers/{managerId}", svc.Manager)
 }
@@ -63,7 +72,7 @@ type odataID struct {
 	ODataID string `json:"@odata.id"`
 }
 
-func writeRedfishJSON(w http.ResponseWriter, status int, body interface{}) {
+func writeRedfishJSON(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("OData-Version", "4.0")
 	w.WriteHeader(status)
@@ -73,11 +82,11 @@ func writeRedfishJSON(w http.ResponseWriter, status int, body interface{}) {
 }
 
 func writeRedfishError(w http.ResponseWriter, status int, message string) {
-	body := map[string]interface{}{
-		"error": map[string]interface{}{
-			"code":    fmt.Sprintf("Base.1.0.GeneralError"),
+	body := map[string]any{
+		"error": map[string]any{
+			"code":    "Base.1.0.GeneralError",
 			"message": message,
-			"@Message.ExtendedInfo": []map[string]interface{}{
+			"@Message.ExtendedInfo": []map[string]any{
 				{
 					"MessageId": "Base.1.0.GeneralError",
 					"Message":   message,
@@ -90,14 +99,14 @@ func writeRedfishError(w http.ResponseWriter, status int, message string) {
 }
 
 // systemID returns the Redfish-safe ID for a managed device.
-func systemID(d *provider.ManagedDevice) string {
+func systemID(d *providers.ManagedDevice) string {
 	if d.Name != "" {
 		return d.Name
 	}
-	return provider.MACToRedfishID(d.MAC)
+	return providers.MACToRedfishID(d.MAC)
 }
 
-func (s *redfishService) resolveSystem(r *http.Request) (*provider.ManagedDevice, error) {
+func (s *redfishService) resolveSystem(r *http.Request) (*providers.ManagedDevice, error) {
 	id := r.PathValue("systemId")
 	if id == "" {
 		return nil, fmt.Errorf("system ID is required")
@@ -116,7 +125,7 @@ func (s *redfishService) resolveSystem(r *http.Request) (*provider.ManagedDevice
 
 // ServiceRoot handles GET /redfish/v1/
 func (s *redfishService) ServiceRoot(w http.ResponseWriter, _ *http.Request) {
-	body := map[string]interface{}{
+	body := map[string]any{
 		"@odata.type":    "#ServiceRoot.v1_5_0.ServiceRoot",
 		"@odata.id":      "/redfish/v1/",
 		"@odata.context": "/redfish/v1/$metadata#ServiceRoot.ServiceRoot",
@@ -136,18 +145,20 @@ func (s *redfishService) Systems(w http.ResponseWriter, _ *http.Request) {
 	members := make([]odataID, 0, len(devices))
 	for _, d := range devices {
 		// Only include devices that have power control capability.
-		if d.HasCapability(provider.CapPowerControl) || d.HasCapability(provider.CapVirtualMedia) || d.HasCapability(provider.CapBootDevice) {
+		if d.HasCapability(providers.CapPowerControl) ||
+			d.HasCapability(providers.CapVirtualMedia) ||
+			d.HasCapability(providers.CapBootDevice) {
 			members = append(members, odataID{
 				ODataID: fmt.Sprintf("/redfish/v1/Systems/%s", systemID(d)),
 			})
 		}
 	}
 
-	body := map[string]interface{}{
-		"@odata.type":    "#ComputerSystemCollection.ComputerSystemCollection",
-		"@odata.id":      "/redfish/v1/Systems",
-		"@odata.context": "/redfish/v1/$metadata#ComputerSystemCollection.ComputerSystemCollection",
-		"Name":           "Computer System Collection",
+	body := map[string]any{
+		"@odata.type":         "#ComputerSystemCollection.ComputerSystemCollection",
+		"@odata.id":           "/redfish/v1/Systems",
+		"@odata.context":      "/redfish/v1/$metadata#ComputerSystemCollection.ComputerSystemCollection",
+		"Name":                "Computer System Collection",
 		"Members@odata.count": len(members),
 		"Members":             members,
 	}
@@ -163,7 +174,7 @@ func (s *redfishService) System(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sysID := systemID(dev)
-	body := map[string]interface{}{
+	body := map[string]any{
 		"@odata.type":    "#ComputerSystem.v1_5_0.ComputerSystem",
 		"@odata.id":      fmt.Sprintf("/redfish/v1/Systems/%s", sysID),
 		"@odata.context": "/redfish/v1/$metadata#ComputerSystem.ComputerSystem",
@@ -183,8 +194,8 @@ func (s *redfishService) System(w http.ResponseWriter, r *http.Request) {
 			body["PowerState"] = "Unknown"
 		}
 
-		body["Actions"] = map[string]interface{}{
-			"#ComputerSystem.Reset": map[string]interface{}{
+		body["Actions"] = map[string]any{
+			"#ComputerSystem.Reset": map[string]any{
 				"target": fmt.Sprintf("/redfish/v1/Systems/%s/Actions/ComputerSystem.Reset", sysID),
 				"ResetType@Redfish.AllowableValues": []string{
 					"On", "ForceOff", "GracefulShutdown", "ForceRestart",
@@ -194,7 +205,7 @@ func (s *redfishService) System(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Virtual media link.
-	if dev.HasCapability(provider.CapVirtualMedia) {
+	if dev.HasCapability(providers.CapVirtualMedia) {
 		body["VirtualMedia"] = odataID{
 			ODataID: fmt.Sprintf("/redfish/v1/Systems/%s/VirtualMedia", sysID),
 		}
@@ -236,12 +247,20 @@ func (s *redfishService) SystemReset(w http.ResponseWriter, r *http.Request) {
 
 	state := redfishResetToDriverState(body.ResetType)
 	if state == "" {
-		writeRedfishError(w, http.StatusBadRequest, fmt.Sprintf("unsupported ResetType: %s", body.ResetType))
+		writeRedfishError(
+			w,
+			http.StatusBadRequest,
+			fmt.Sprintf("unsupported ResetType: %s", body.ResetType),
+		)
 		return
 	}
 
 	if err := pc.SetPowerState(r.Context(), state); err != nil {
-		writeRedfishError(w, http.StatusInternalServerError, fmt.Sprintf("failed to set power state: %v", err))
+		writeRedfishError(
+			w,
+			http.StatusInternalServerError,
+			fmt.Sprintf("failed to set power state: %v", err),
+		)
 		return
 	}
 
@@ -256,17 +275,17 @@ func (s *redfishService) VirtualMediaCollection(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	if !dev.HasCapability(provider.CapVirtualMedia) {
+	if !dev.HasCapability(providers.CapVirtualMedia) {
 		writeRedfishError(w, http.StatusNotFound, "device does not support virtual media")
 		return
 	}
 
 	sysID := systemID(dev)
-	body := map[string]interface{}{
-		"@odata.type":    "#VirtualMediaCollection.VirtualMediaCollection",
-		"@odata.id":      fmt.Sprintf("/redfish/v1/Systems/%s/VirtualMedia", sysID),
-		"@odata.context": "/redfish/v1/$metadata#VirtualMediaCollection.VirtualMediaCollection",
-		"Name":           "Virtual Media Collection",
+	body := map[string]any{
+		"@odata.type":         "#VirtualMediaCollection.VirtualMediaCollection",
+		"@odata.id":           fmt.Sprintf("/redfish/v1/Systems/%s/VirtualMedia", sysID),
+		"@odata.context":      "/redfish/v1/$metadata#VirtualMediaCollection.VirtualMediaCollection",
+		"Name":                "Virtual Media Collection",
 		"Members@odata.count": 1,
 		"Members": []odataID{
 			{ODataID: fmt.Sprintf("/redfish/v1/Systems/%s/VirtualMedia/1", sysID)},
@@ -294,7 +313,11 @@ func (s *redfishService) VirtualMedia(w http.ResponseWriter, r *http.Request) {
 
 	state, err := vmc.GetMediaState(r.Context())
 	if err != nil {
-		writeRedfishError(w, http.StatusInternalServerError, fmt.Sprintf("failed to get media state: %v", err))
+		writeRedfishError(
+			w,
+			http.StatusInternalServerError,
+			fmt.Sprintf("failed to get media state: %v", err),
+		)
 		return
 	}
 
@@ -308,7 +331,7 @@ func (s *redfishService) VirtualMedia(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	body := map[string]interface{}{
+	body := map[string]any{
 		"@odata.type":    "#VirtualMedia.v1_2_0.VirtualMedia",
 		"@odata.id":      fmt.Sprintf("/redfish/v1/Systems/%s/VirtualMedia/%s", sysID, vmID),
 		"@odata.context": "/redfish/v1/$metadata#VirtualMedia.VirtualMedia",
@@ -319,12 +342,20 @@ func (s *redfishService) VirtualMedia(w http.ResponseWriter, r *http.Request) {
 		"Image":          "",
 		"ConnectedVia":   "URI",
 		"MediaType":      mediaType,
-		"Actions": map[string]interface{}{
-			"#VirtualMedia.InsertMedia": map[string]interface{}{
-				"target": fmt.Sprintf("/redfish/v1/Systems/%s/VirtualMedia/%s/Actions/VirtualMedia.InsertMedia", sysID, vmID),
+		"Actions": map[string]any{
+			"#VirtualMedia.InsertMedia": map[string]any{
+				"target": fmt.Sprintf(
+					"/redfish/v1/Systems/%s/VirtualMedia/%s/Actions/VirtualMedia.InsertMedia",
+					sysID,
+					vmID,
+				),
 			},
-			"#VirtualMedia.EjectMedia": map[string]interface{}{
-				"target": fmt.Sprintf("/redfish/v1/Systems/%s/VirtualMedia/%s/Actions/VirtualMedia.EjectMedia", sysID, vmID),
+			"#VirtualMedia.EjectMedia": map[string]any{
+				"target": fmt.Sprintf(
+					"/redfish/v1/Systems/%s/VirtualMedia/%s/Actions/VirtualMedia.EjectMedia",
+					sysID,
+					vmID,
+				),
 			},
 		},
 	}
@@ -366,7 +397,11 @@ func (s *redfishService) VirtualMediaInsert(w http.ResponseWriter, r *http.Reque
 	}
 
 	if err := vmc.MountMedia(r.Context(), body.Image, "cdrom"); err != nil {
-		writeRedfishError(w, http.StatusInternalServerError, fmt.Sprintf("failed to mount media: %v", err))
+		writeRedfishError(
+			w,
+			http.StatusInternalServerError,
+			fmt.Sprintf("failed to mount media: %v", err),
+		)
 		return
 	}
 
@@ -388,7 +423,11 @@ func (s *redfishService) VirtualMediaEject(w http.ResponseWriter, r *http.Reques
 	}
 
 	if err := vmc.UnmountMedia(r.Context()); err != nil {
-		writeRedfishError(w, http.StatusInternalServerError, fmt.Sprintf("failed to eject media: %v", err))
+		writeRedfishError(
+			w,
+			http.StatusInternalServerError,
+			fmt.Sprintf("failed to eject media: %v", err),
+		)
 		return
 	}
 
@@ -400,20 +439,20 @@ func (s *redfishService) Managers(w http.ResponseWriter, _ *http.Request) {
 	devices := s.dm.AllDevices()
 	members := make([]odataID, 0, len(devices))
 	for _, d := range devices {
-		if d.HasCapability(provider.CapBMCInfo) {
+		if d.HasCapability(providers.CapBMCInfo) {
 			members = append(members, odataID{
 				ODataID: fmt.Sprintf("/redfish/v1/Managers/%s", systemID(d)),
 			})
 		}
 	}
 
-	body := map[string]interface{}{
-		"@odata.type":          "#ManagerCollection.ManagerCollection",
-		"@odata.id":            "/redfish/v1/Managers",
-		"@odata.context":       "/redfish/v1/$metadata#ManagerCollection.ManagerCollection",
-		"Name":                 "Manager Collection",
-		"Members@odata.count":  len(members),
-		"Members":              members,
+	body := map[string]any{
+		"@odata.type":         "#ManagerCollection.ManagerCollection",
+		"@odata.id":           "/redfish/v1/Managers",
+		"@odata.context":      "/redfish/v1/$metadata#ManagerCollection.ManagerCollection",
+		"Name":                "Manager Collection",
+		"Members@odata.count": len(members),
+		"Members":             members,
 	}
 	writeRedfishJSON(w, http.StatusOK, body)
 }
@@ -432,7 +471,7 @@ func (s *redfishService) Manager(w http.ResponseWriter, r *http.Request) {
 	}
 
 	mgrID := systemID(dev)
-	body := map[string]interface{}{
+	body := map[string]any{
 		"@odata.type":    "#Manager.v1_5_0.Manager",
 		"@odata.id":      fmt.Sprintf("/redfish/v1/Managers/%s", mgrID),
 		"@odata.context": "/redfish/v1/$metadata#Manager.Manager",
@@ -454,7 +493,10 @@ func (s *redfishService) Manager(w http.ResponseWriter, r *http.Request) {
 	for _, c := range caps {
 		capNames = append(capNames, string(c))
 	}
-	body["Description"] = fmt.Sprintf("BMC Manager (capabilities: %s)", strings.Join(capNames, ", "))
+	body["Description"] = fmt.Sprintf(
+		"BMC Manager (capabilities: %s)",
+		strings.Join(capNames, ", "),
+	)
 
 	writeRedfishJSON(w, http.StatusOK, body)
 }

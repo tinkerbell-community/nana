@@ -1,21 +1,22 @@
-package provider
+package providers
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 )
 
 // ProviderConfig holds typed provider configuration from YAML.
 type ProviderConfig struct {
-	Type     string `mapstructure:"type" yaml:"type"`
-	Host     string `mapstructure:"host" yaml:"host"`
+	Type     string `mapstructure:"type"     yaml:"type"`
+	Host     string `mapstructure:"host"     yaml:"host"`
 	Password string `mapstructure:"password" yaml:"password"`
 }
 
 // ToMap converts a ProviderConfig to a generic map for provider factories.
-func (pc *ProviderConfig) ToMap() map[string]interface{} {
-	m := map[string]interface{}{
+func (pc *ProviderConfig) ToMap() map[string]any {
+	m := map[string]any{
 		"type": pc.Type,
 	}
 	if pc.Host != "" {
@@ -28,7 +29,7 @@ func (pc *ProviderConfig) ToMap() map[string]interface{} {
 }
 
 // Factory creates a provider instance from configuration.
-type Factory func(cfg map[string]interface{}) (Provider, error)
+type Factory func(cfg map[string]any) (Provider, error)
 
 // Registry manages provider factories and allows creating providers by type name.
 type Registry struct {
@@ -53,7 +54,7 @@ func (r *Registry) Register(name string, factory Factory) {
 }
 
 // Create instantiates a provider from the registry.
-func (r *Registry) Create(name string, cfg map[string]interface{}) (Provider, error) {
+func (r *Registry) Create(name string, cfg map[string]any) (Provider, error) {
 	r.mu.RLock()
 	factory, ok := r.factories[name]
 	r.mu.RUnlock()
@@ -80,7 +81,7 @@ func Register(name string, factory Factory) {
 }
 
 // Create instantiates a provider from the default registry.
-func Create(name string, cfg map[string]interface{}) (Provider, error) {
+func Create(name string, cfg map[string]any) (Provider, error) {
 	return defaultRegistry.Create(name, cfg)
 }
 
@@ -105,10 +106,10 @@ func (d *ManagedDevice) ID() string {
 }
 
 // HasCapability returns true if any provider offers the given capability.
-func (d *ManagedDevice) HasCapability(cap Capability) bool {
+func (d *ManagedDevice) HasCapability(c Capability) bool {
 	for _, p := range d.Providers {
-		if HasCapability(p, cap) {
-			return true
+		if HasCapability(p, c) {
+			return slices.Contains(p.Capabilities(), c)
 		}
 	}
 	return false

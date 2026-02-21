@@ -11,21 +11,21 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jetkvm/cloud-api/mgmt-api/pkg/provider"
+	"github.com/jetkvm/cloud-api/mgmt-api/pkg/providers"
 )
 
 // mockTestDriver implements all provider capability interfaces for testing.
 type mockTestDriver struct {
 	powerState string
-	mediaState *provider.VirtualMediaState
+	mediaState *providers.VirtualMediaState
 	bmcVersion string
 	bootDevice string
-	caps       []provider.Capability
+	caps       []providers.Capability
 	setPowerErr error
 }
 
 func (m *mockTestDriver) Name() string                       { return "mock" }
-func (m *mockTestDriver) Capabilities() []provider.Capability   { return m.caps }
+func (m *mockTestDriver) Capabilities() []providers.Capability   { return m.caps }
 func (m *mockTestDriver) Open(_ context.Context) error        { return nil }
 func (m *mockTestDriver) Close() error                        { return nil }
 
@@ -42,18 +42,18 @@ func (m *mockTestDriver) SetPowerState(_ context.Context, state string) error {
 }
 
 func (m *mockTestDriver) MountMedia(_ context.Context, url, kind string) error {
-	m.mediaState = &provider.VirtualMediaState{Inserted: true, Image: url, Kind: kind}
+	m.mediaState = &providers.VirtualMediaState{Inserted: true, Image: url, Kind: kind}
 	return nil
 }
 
 func (m *mockTestDriver) UnmountMedia(_ context.Context) error {
-	m.mediaState = &provider.VirtualMediaState{}
+	m.mediaState = &providers.VirtualMediaState{}
 	return nil
 }
 
-func (m *mockTestDriver) GetMediaState(_ context.Context) (*provider.VirtualMediaState, error) {
+func (m *mockTestDriver) GetMediaState(_ context.Context) (*providers.VirtualMediaState, error) {
 	if m.mediaState == nil {
-		return &provider.VirtualMediaState{}, nil
+		return &providers.VirtualMediaState{}, nil
 	}
 	return m.mediaState, nil
 }
@@ -67,24 +67,24 @@ func (m *mockTestDriver) SetBootDevice(_ context.Context, device string, persist
 	return nil
 }
 
-func newTestDeviceManager() (*provider.DeviceManager, *mockTestDriver) {
-	dm := provider.NewDeviceManager()
+func newTestDeviceManager() (*providers.DeviceManager, *mockTestDriver) {
+	dm := providers.NewDeviceManager()
 
 	mockDrv := &mockTestDriver{
 		powerState: "on",
 		bmcVersion: "1.0.0",
-		caps: []provider.Capability{
-			provider.CapPowerControl,
-			provider.CapVirtualMedia,
-			provider.CapBMCInfo,
-			provider.CapBootDevice,
+		caps: []providers.Capability{
+			providers.CapPowerControl,
+			providers.CapVirtualMedia,
+			providers.CapBMCInfo,
+			providers.CapBootDevice,
 		},
 	}
 
-	dm.AddDevice(&provider.ManagedDevice{
+	dm.AddDevice(&providers.ManagedDevice{
 		Name:      "server-01",
 		MAC:       "AA:BB:CC:DD:EE:FF",
-		Providers: []provider.Provider{mockDrv},
+		Providers: []providers.Provider{mockDrv},
 	})
 
 	return dm, mockDrv
@@ -199,7 +199,7 @@ func TestRpcHandler_SetVirtualMedia(t *testing.T) {
 
 func TestRpcHandler_SetVirtualMedia_Unmount(t *testing.T) {
 	svc, mockDrv := newTestRPCService()
-	mockDrv.mediaState = &provider.VirtualMediaState{Inserted: true, Image: "http://example.com/boot.iso"}
+	mockDrv.mediaState = &providers.VirtualMediaState{Inserted: true, Image: "http://example.com/boot.iso"}
 
 	payload := RequestPayload{
 		Method: VirtualMediaMethod,

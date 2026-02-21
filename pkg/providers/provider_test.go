@@ -1,4 +1,4 @@
-package provider
+package providers
 
 import (
 	"context"
@@ -19,7 +19,7 @@ type mockProvider struct {
 	unmountErr  error
 }
 
-func (m *mockProvider) Name() string                { return m.name }
+func (m *mockProvider) Name() string                 { return m.name }
 func (m *mockProvider) Capabilities() []Capability   { return m.caps }
 func (m *mockProvider) Open(_ context.Context) error { return m.openErr }
 func (m *mockProvider) Close() error                 { return m.closeErr }
@@ -284,7 +284,7 @@ func TestDeviceManager_AllDevices(t *testing.T) {
 func TestRegistry(t *testing.T) {
 	reg := NewRegistry()
 
-	reg.Register("mock", func(cfg map[string]interface{}) (Provider, error) {
+	reg.Register("mock", func(cfg map[string]any) (Provider, error) {
 		return &mockProvider{name: "mock", caps: []Capability{CapPowerControl}}, nil
 	})
 

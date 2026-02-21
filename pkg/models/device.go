@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/jetkvm/cloud-api/mgmt-api/pkg/provider"
+	"github.com/jetkvm/cloud-api/mgmt-api/pkg/providers"
 )
 
 // ResolveDevice identifies the target managed device from an HTTP request.
@@ -16,7 +16,7 @@ import (
 //  2. "host" field in the RPC request body (caller should pass it explicitly)
 //
 // Returns an error if no device can be resolved.
-func ResolveDevice(r *http.Request, dm *provider.DeviceManager) (*provider.ManagedDevice, error) {
+func ResolveDevice(r *http.Request, dm *providers.DeviceManager) (*providers.ManagedDevice, error) {
 	id := strings.TrimSpace(r.Header.Get("X-Device"))
 	if id == "" {
 		return nil, fmt.Errorf("X-Device header is required to identify target device")
@@ -30,7 +30,7 @@ func ResolveDevice(r *http.Request, dm *provider.DeviceManager) (*provider.Manag
 }
 
 // ResolveDeviceByID looks up a device by name or MAC address.
-func ResolveDeviceByID(id string, dm *provider.DeviceManager) (*provider.ManagedDevice, error) {
+func ResolveDeviceByID(id string, dm *providers.DeviceManager) (*providers.ManagedDevice, error) {
 	device := dm.FindDevice(id)
 	if device == nil {
 		return nil, fmt.Errorf("device not found: %s", id)

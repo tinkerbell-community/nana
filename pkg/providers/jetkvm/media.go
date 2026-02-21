@@ -3,7 +3,7 @@ package jetkvm
 import (
 	"context"
 
-	"github.com/jetkvm/cloud-api/mgmt-api/pkg/provider"
+	"github.com/jetkvm/cloud-api/mgmt-api/pkg/providers"
 )
 
 // MountMedia mounts an image from a URL. Kind is "cdrom" or "floppy".
@@ -20,12 +20,12 @@ func (p *Provider) UnmountMedia(ctx context.Context) error {
 }
 
 // GetMediaState returns the current virtual media state.
-func (p *Provider) GetMediaState(ctx context.Context) (*provider.VirtualMediaState, error) {
+func (p *Provider) GetMediaState(ctx context.Context) (*providers.VirtualMediaState, error) {
 	state, err := p.kvmClient.GetVirtualMediaState(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return &provider.VirtualMediaState{
+	return &providers.VirtualMediaState{
 		Inserted: state.URL != "",
 		Image:    state.URL,
 		Kind:     state.Mode,

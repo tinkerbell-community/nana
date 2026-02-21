@@ -7,9 +7,12 @@
 //
 // This design is inspired by github.com/bmc-toolbox/bmclib, where different
 // providers implement different BMC operations.
-package provider
+package providers
 
-import "context"
+import (
+	"context"
+	"slices"
+)
 
 // Capability represents a BMC management capability that a provider can offer.
 type Capability string
@@ -81,11 +84,6 @@ type BMCInfoProvider interface {
 }
 
 // HasCapability checks if a provider offers a specific capability.
-func HasCapability(p Provider, cap Capability) bool {
-	for _, c := range p.Capabilities() {
-		if c == cap {
-			return true
-		}
-	}
-	return false
+func HasCapability(p Provider, c Capability) bool {
+	return slices.Contains(p.Capabilities(), c)
 }

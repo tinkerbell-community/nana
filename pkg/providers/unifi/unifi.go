@@ -16,11 +16,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jetkvm/cloud-api/mgmt-api/pkg/provider"
+	"github.com/jetkvm/cloud-api/mgmt-api/pkg/providers"
 	"golang.org/x/crypto/ssh"
 )
 
-// Provider implements the provider.Provider and provider.PowerController
+// Provider implements the providers.Provider and providers.PowerController
 // interfaces for devices powered via UniFi switch PoE ports.
 type Provider struct {
 	sshConfig  *ssh.ClientConfig
@@ -32,10 +32,10 @@ type Provider struct {
 }
 
 func init() {
-	provider.Register("unifi", newProvider)
+	providers.Register("unifi", newProvider)
 }
 
-func newProvider(cfg map[string]interface{}) (provider.Provider, error) {
+func newProvider(cfg map[string]interface{}) (providers.Provider, error) {
 	host, _ := cfg["host"].(string)
 	if host == "" {
 		return nil, fmt.Errorf("unifi provider requires 'host' config")
@@ -102,8 +102,8 @@ func newProvider(cfg map[string]interface{}) (provider.Provider, error) {
 func (p *Provider) Name() string { return "unifi" }
 
 // Capabilities returns the list of capabilities this provider offers.
-func (p *Provider) Capabilities() []provider.Capability {
-	return []provider.Capability{provider.CapPowerControl}
+func (p *Provider) Capabilities() []providers.Capability {
+	return []providers.Capability{providers.CapPowerControl}
 }
 
 // Open is a no-op; SSH connections are made per-command.
@@ -139,9 +139,9 @@ func (p *Provider) resolvePort(ctx context.Context) (int, error) {
 	}
 
 	// Try normalized comparison.
-	normalizedSearch := provider.NormalizeMAC(p.mac)
+	normalizedSearch := providers.NormalizeMAC(p.mac)
 	for _, entry := range ml.entries {
-		if provider.NormalizeMAC(entry.macAddress) == normalizedSearch {
+		if providers.NormalizeMAC(entry.macAddress) == normalizedSearch {
 			p.cachedPort = entry.port
 			return p.cachedPort, nil
 		}
@@ -335,6 +335,6 @@ func parseMacList(output string) (*macList, error) {
 
 // Compile-time interface checks.
 var (
-	_ provider.Provider        = (*Provider)(nil)
-	_ provider.PowerController = (*Provider)(nil)
+	_ providers.Provider        = (*Provider)(nil)
+	_ providers.PowerController = (*Provider)(nil)
 )

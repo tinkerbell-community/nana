@@ -10,10 +10,10 @@ import (
 	"time"
 
 	"github.com/jetkvm/cloud-api/mgmt-api/pkg/client"
-	"github.com/jetkvm/cloud-api/mgmt-api/pkg/provider"
+	"github.com/jetkvm/cloud-api/mgmt-api/pkg/providers"
 )
 
-// Provider implements the provider.Provider interface for JetKVM devices.
+// Provider implements the providers.Provider interface for JetKVM devices.
 type Provider struct {
 	kvmClient *client.Client
 	host      string
@@ -22,10 +22,10 @@ type Provider struct {
 }
 
 func init() {
-	provider.Register("jetkvm", newProvider)
+	providers.Register("jetkvm", newProvider)
 }
 
-func newProvider(cfg map[string]interface{}) (provider.Provider, error) {
+func newProvider(cfg map[string]interface{}) (providers.Provider, error) {
 	host, _ := cfg["host"].(string)
 	if host == "" {
 		return nil, fmt.Errorf("jetkvm provider requires 'host' config")
@@ -58,8 +58,8 @@ func newProvider(cfg map[string]interface{}) (provider.Provider, error) {
 func (p *Provider) Name() string { return "jetkvm" }
 
 // Capabilities returns the list of capabilities this provider offers.
-func (p *Provider) Capabilities() []provider.Capability {
-	return []provider.Capability{provider.CapPowerControl, provider.CapVirtualMedia, provider.CapBMCInfo}
+func (p *Provider) Capabilities() []providers.Capability {
+	return []providers.Capability{providers.CapPowerControl, providers.CapVirtualMedia, providers.CapBMCInfo}
 }
 
 // Open initializes the WebRTC connection to the JetKVM device.
@@ -74,8 +74,8 @@ func (p *Provider) Close() error {
 
 // Compile-time interface checks.
 var (
-	_ provider.Provider               = (*Provider)(nil)
-	_ provider.PowerController        = (*Provider)(nil)
-	_ provider.VirtualMediaController = (*Provider)(nil)
-	_ provider.BMCInfoProvider        = (*Provider)(nil)
+	_ providers.Provider               = (*Provider)(nil)
+	_ providers.PowerController        = (*Provider)(nil)
+	_ providers.VirtualMediaController = (*Provider)(nil)
+	_ providers.BMCInfoProvider        = (*Provider)(nil)
 )

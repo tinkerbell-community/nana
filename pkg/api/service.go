@@ -9,8 +9,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/jetkvm/cloud-api/mgmt-api/pkg/provider"
 	"github.com/jetkvm/cloud-api/mgmt-api/pkg/models"
+	"github.com/jetkvm/cloud-api/mgmt-api/pkg/providers"
 )
 
 // RpcService defines the interface for the RPC handler service.
@@ -19,7 +19,7 @@ type RpcService interface {
 }
 
 type rpcService struct {
-	dm         *provider.DeviceManager
+	dm         *providers.DeviceManager
 	rpcTimeout time.Duration
 	logger     *slog.Logger
 }
@@ -33,7 +33,7 @@ func writeError(w http.ResponseWriter, statusCode int, message string) {
 	}
 }
 
-func (s *rpcService) getDevice(r *http.Request) (*provider.ManagedDevice, error) {
+func (s *rpcService) getDevice(r *http.Request) (*providers.ManagedDevice, error) {
 	// First try X-Device header.
 	dev, err := models.ResolveDevice(r, s.dm)
 	if err != nil {
@@ -42,14 +42,14 @@ func (s *rpcService) getDevice(r *http.Request) (*provider.ManagedDevice, error)
 	return dev, nil
 }
 
-func (s *rpcService) getDeviceByHost(host string) (*provider.ManagedDevice, error) {
+func (s *rpcService) getDeviceByHost(host string) (*providers.ManagedDevice, error) {
 	if host == "" {
 		return nil, fmt.Errorf("device identifier is required")
 	}
 	return models.ResolveDeviceByID(host, s.dm)
 }
 
-func (s *rpcService) getPowerState(ctx context.Context, dev *provider.ManagedDevice) (string, error) {
+func (s *rpcService) getPowerState(ctx context.Context, dev *providers.ManagedDevice) (string, error) {
 	pc := dev.PowerController()
 	if pc == nil {
 		return "", fmt.Errorf("device does not support power control")
@@ -57,7 +57,7 @@ func (s *rpcService) getPowerState(ctx context.Context, dev *provider.ManagedDev
 	return pc.GetPowerState(ctx)
 }
 
-func (s *rpcService) setPowerState(ctx context.Context, dev *provider.ManagedDevice, state string) error {
+func (s *rpcService) setPowerState(ctx context.Context, dev *providers.ManagedDevice, state string) error {
 	pc := dev.PowerController()
 	if pc == nil {
 		return fmt.Errorf("device does not support power control")
@@ -103,7 +103,7 @@ func (s *rpcService) RpcHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Resolve device: try X-Device header first, then host field from request.
-	var dev *provider.ManagedDevice
+	var dev *providers.ManagedDevice
 	var err error
 
 	dev, err = s.getDevice(r)
@@ -371,7 +371,7 @@ func writeResponse(w http.ResponseWriter, rp ResponsePayload) {
 }
 
 // NewBMCService creates a new RPC service for BMC-compatible management.
-func NewBMCService(dm *provider.DeviceManager, rpcTimeout time.Duration, logger *slog.Logger) RpcService {
+func NewBMCService(dm *providers.DeviceManager, rpcTimeout time.Duration, logger *slog.Logger) RpcService {
 	if rpcTimeout == 0 {
 		rpcTimeout = 30 * time.Second
 	}

@@ -10,7 +10,7 @@ import (
 
 	"github.com/jetkvm/cloud-api/mgmt-api/pkg/api"
 	"github.com/jetkvm/cloud-api/mgmt-api/pkg/config"
-	"github.com/jetkvm/cloud-api/mgmt-api/pkg/provider"
+	"github.com/jetkvm/cloud-api/mgmt-api/pkg/providers"
 	_ "github.com/jetkvm/cloud-api/mgmt-api/pkg/providers/jetkvm" // register jetkvm provider
 	_ "github.com/jetkvm/cloud-api/mgmt-api/pkg/providers/unifi"  // register unifi provider
 	"github.com/spf13/cobra"
@@ -53,13 +53,13 @@ func (rw *responseWriter) WriteHeader(code int) {
 	rw.ResponseWriter.WriteHeader(code)
 }
 
-func buildDeviceManager(cfg *config.Config, logger *slog.Logger) (*provider.DeviceManager, error) {
-	dm := provider.NewDeviceManager()
+func buildDeviceManager(cfg *config.Config, logger *slog.Logger) (*providers.DeviceManager, error) {
+	dm := providers.NewDeviceManager()
 
 	for i, devCfg := range cfg.Devices {
-		var providers []provider.Provider
+		var p []providers.Provider
 		for j, prvCfg := range devCfg.Providers {
-			prvMap := map[string]interface{}{
+			prvMap := map[string]any{
 				"type": prvCfg.Type,
 				"mac":  devCfg.MAC,
 			}
@@ -84,11 +84,11 @@ func buildDeviceManager(cfg *config.Config, logger *slog.Logger) (*provider.Devi
 				prvMap["ssh_key_path"] = sshKeyPath
 			}
 
-			prv, err := provider.Create(prvCfg.Type, prvMap)
+			prv, err := providers.Create(prvCfg.Type, prvMap)
 			if err != nil {
 				return nil, fmt.Errorf("device[%d].providers[%d] (%s): %w", i, j, prvCfg.Type, err)
 			}
-			providers = append(providers, prv)
+			p = append(p, prv)
 
 			logger.Info("registered provider",
 				slog.String("device", devCfg.MAC),
@@ -98,10 +98,10 @@ func buildDeviceManager(cfg *config.Config, logger *slog.Logger) (*provider.Devi
 			)
 		}
 
-		dev := &provider.ManagedDevice{
+		dev := &providers.ManagedDevice{
 			Name:      devCfg.Name,
 			MAC:       devCfg.MAC,
-			Providers: providers,
+			Providers: p,
 		}
 		dm.AddDevice(dev)
 
@@ -183,7 +183,7 @@ Example:
 
 		fmt.Printf("JetKVM Management API is running on http://%s:%d\n", cfg.Address, cfg.Port)
 		fmt.Printf("Registered %d device(s)\n", len(cfg.Devices))
-		fmt.Printf("Available providers: %v\n", provider.Available())
+		fmt.Printf("Available providers: %v\n", providers.Available())
 		fmt.Printf("Endpoints:\n")
 		fmt.Printf("  POST /rpc                  - bmclib-compatible JSON-RPC\n")
 		fmt.Printf("  GET  /redfish/v1/           - Redfish Service Root\n")

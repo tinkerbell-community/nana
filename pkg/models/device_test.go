@@ -5,27 +5,27 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/jetkvm/cloud-api/mgmt-api/pkg/provider"
+	"github.com/jetkvm/cloud-api/mgmt-api/pkg/providers"
 )
 
 // stubDriver is a minimal driver for testing device resolution.
 type stubProvider struct{}
 
 func (s *stubProvider) Name() string                       { return "stub" }
-func (s *stubProvider) Capabilities() []provider.Capability   { return []provider.Capability{provider.CapPowerControl} }
+func (s *stubProvider) Capabilities() []providers.Capability   { return []providers.Capability{providers.CapPowerControl} }
 func (s *stubProvider) Open(_ context.Context) error        { return nil }
 func (s *stubProvider) Close() error                        { return nil }
 
-func newTestDeviceManager() *provider.DeviceManager {
-	dm := provider.NewDeviceManager()
-	dm.AddDevice(&provider.ManagedDevice{
+func newTestDeviceManager() *providers.DeviceManager {
+	dm := providers.NewDeviceManager()
+	dm.AddDevice(&providers.ManagedDevice{
 		Name:      "server-01",
 		MAC:       "AA:BB:CC:DD:EE:FF",
-		Providers: []provider.Provider{&stubProvider{}},
+		Providers: []providers.Provider{&stubProvider{}},
 	})
-	dm.AddDevice(&provider.ManagedDevice{
+	dm.AddDevice(&providers.ManagedDevice{
 		MAC:       "11:22:33:44:55:66",
-		Providers: []provider.Provider{&stubProvider{}},
+		Providers: []providers.Provider{&stubProvider{}},
 	})
 	return dm
 }

@@ -7,19 +7,19 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/jetkvm/cloud-api/mgmt-api/pkg/provider"
+	"github.com/jetkvm/cloud-api/mgmt-api/pkg/providers"
 )
 
 func newTestRedfishService() (RedfishService, *mockTestDriver) {
 	dm, mockDrv := newTestDeviceManager()
 
 	// Add a second device with no name (MAC-only).
-	dm.AddDevice(&provider.ManagedDevice{
+	dm.AddDevice(&providers.ManagedDevice{
 		MAC: "11:22:33:44:55:66",
-		Providers: []provider.Provider{
+		Providers: []providers.Provider{
 			&mockTestDriver{
 				powerState: "off",
-				caps:       []provider.Capability{provider.CapPowerControl},
+				caps:       []providers.Capability{providers.CapPowerControl},
 			},
 		},
 	})

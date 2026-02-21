@@ -60,7 +60,7 @@ type ProviderConfig struct {
 	// SSHUsername is the SSH username (default: "root"). Used by SSH-based providers.
 	SSHUsername string `mapstructure:"ssh_username" yaml:"ssh_username"`
 
-	// SSHKeyPath overrides the global ssh_key_path for this provider.
+	// SSHKeyPath overrides the global ssh_key_path for this providers.
 	SSHKeyPath string `mapstructure:"ssh_key_path" yaml:"ssh_key_path"`
 }
 
