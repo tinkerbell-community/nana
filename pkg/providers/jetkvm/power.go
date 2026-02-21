@@ -2,11 +2,15 @@ package jetkvm
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 )
 
 // GetPowerState returns the current power state of the JetKVM-managed device.
 func (p *Provider) GetPowerState(ctx context.Context) (string, error) {
+	if err := p.ensureConnected(ctx); err != nil {
+		return "", fmt.Errorf("failed to connect to JetKVM: %w", err)
+	}
 	state, err := p.kvmClient.GetPowerState(ctx)
 	if err != nil {
 		return "", err
@@ -16,6 +20,9 @@ func (p *Provider) GetPowerState(ctx context.Context) (string, error) {
 
 // SetPowerState sets the power state. Valid values: "on", "off", "cycle", "reset".
 func (p *Provider) SetPowerState(ctx context.Context, state string) error {
+	if err := p.ensureConnected(ctx); err != nil {
+		return fmt.Errorf("failed to connect to JetKVM: %w", err)
+	}
 	if err := p.kvmClient.SetPowerState(ctx, state); err != nil {
 		return err
 	}

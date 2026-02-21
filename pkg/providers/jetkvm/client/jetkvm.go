@@ -296,6 +296,14 @@ func (c *Client) Connect(ctx context.Context) error {
 
 	dc.OnClose(func() {
 		c.logger.Info("data channel closed", slog.String("host", c.config.Host))
+		c.mu.Lock()
+		c.dc = nil
+		oldPC := c.pc
+		c.pc = nil
+		c.mu.Unlock()
+		if oldPC != nil {
+			_ = oldPC.Close()
+		}
 	})
 
 	dc.OnError(func(err error) {

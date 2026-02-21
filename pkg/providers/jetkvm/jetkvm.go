@@ -74,6 +74,12 @@ func (p *Provider) Open(ctx context.Context) error {
 	return p.kvmClient.Connect(ctx)
 }
 
+// ensureConnected lazily establishes the WebRTC connection if not already open.
+// It is safe to call on every operation — Connect is idempotent when connected.
+func (p *Provider) ensureConnected(ctx context.Context) error {
+	return p.kvmClient.Connect(ctx)
+}
+
 // Close releases the WebRTC connection.
 func (p *Provider) Close() error {
 	return p.kvmClient.Close()
