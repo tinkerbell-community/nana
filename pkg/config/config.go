@@ -19,6 +19,9 @@ type Config struct {
 	Port    int    `mapstructure:"port"    yaml:"port"`
 	Address string `mapstructure:"address" yaml:"address"`
 
+	// Logging.
+	LogLevel string `mapstructure:"log_level" yaml:"log_level"`
+
 	// WebRTC settings (used by JetKVM driver).
 	WebRTCTimeout int `mapstructure:"webrtc_timeout" yaml:"webrtc_timeout"`
 
@@ -104,6 +107,7 @@ func InitConfig() {
 	// Defaults.
 	viper.SetDefault("port", 5000)
 	viper.SetDefault("address", "0.0.0.0")
+	viper.SetDefault("log_level", "info")
 	viper.SetDefault("webrtc_timeout", 30)
 	viper.SetDefault("maxprocs_enable", true)
 	viper.SetDefault("memlimit_enable", true)
@@ -120,10 +124,12 @@ func InitFlags(cmd *cobra.Command) {
 		StringVar(&cfgFile, "config", "", "Config file path (default: ./jetkvm-api.yaml)")
 	cmd.Flags().Int("port", 5000, "HTTP server port")
 	cmd.Flags().String("address", "0.0.0.0", "HTTP server bind address")
+	cmd.Flags().String("log-level", "info", "Log level (debug, info, warn, error)")
 	cmd.Flags().Int("webrtc-timeout", 30, "WebRTC connection timeout in seconds")
 
 	_ = viper.BindPFlag("port", cmd.Flags().Lookup("port"))
 	_ = viper.BindPFlag("address", cmd.Flags().Lookup("address"))
+	_ = viper.BindPFlag("log_level", cmd.Flags().Lookup("log-level"))
 	_ = viper.BindPFlag("webrtc_timeout", cmd.Flags().Lookup("webrtc-timeout"))
 }
 

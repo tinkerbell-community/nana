@@ -838,6 +838,11 @@ func (c *Client) setDCPowerState(ctx context.Context, state string) error {
 		return c.SetDCPowerState(ctx, true)
 	case "off":
 		return c.SetDCPowerState(ctx, false)
+	case "cycle", "reset":
+		if err := c.SetDCPowerState(ctx, false); err != nil {
+			return err
+		}
+		return c.SetDCPowerState(ctx, true)
 	default:
 		return fmt.Errorf("DC power only supports on/off, got: %s", state)
 	}

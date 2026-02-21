@@ -171,15 +171,19 @@ Device Identification:
 Example:
   jetkvm-api --config=config.yaml`,
 	Run: func(cmd *cobra.Command, args []string) {
-		logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-			Level: slog.LevelInfo,
-		}))
-		slog.SetDefault(logger)
-
 		cfg, err := config.LoadConfig()
 		if err != nil {
 			log.Fatalf("Error loading configuration: %v", err)
 		}
+
+		var logLevel slog.Level
+		if err := logLevel.UnmarshalText([]byte(cfg.LogLevel)); err != nil {
+			log.Fatalf("invalid log_level %q: %v", cfg.LogLevel, err)
+		}
+		logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+			Level: logLevel,
+		}))
+		slog.SetDefault(logger)
 
 		// Set Go runtime parameters before we get too far into initialization.
 		if cfg.MaxprocsEnable {

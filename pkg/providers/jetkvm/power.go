@@ -2,6 +2,7 @@ package jetkvm
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -28,8 +29,14 @@ func (p *Provider) SetPowerState(ctx context.Context, state string) error {
 		return err
 	}
 
-	if state == "on" {
-		p.sendWakeOnLan(ctx)
+	switch state {
+	case "on":
+		if err := p.sendWakeOnLan(ctx); err != nil {
+			p.logger.Warn("wake-on-LAN failed",
+				slog.String("host", p.host),
+				slog.String("error", err.Error()),
+			)
+		}
 	}
 
 	if p.hasQueuedTasks(state) {
@@ -42,17 +49,14 @@ func (p *Provider) SetPowerState(ctx context.Context, state string) error {
 }
 
 // sendWakeOnLan retrieves configured WOL devices and sends magic packets for each.
-func (p *Provider) sendWakeOnLan(ctx context.Context) {
+// All send errors are collected and returned as a combined error.
+func (p *Provider) sendWakeOnLan(ctx context.Context) error {
 	devices, err := p.c.GetWakeOnLanDevices(ctx)
 	if err != nil {
-		p.logger.Warn(
-			"failed to get WOL devices",
-			slog.String("host", p.host),
-			slog.String("error", err.Error()),
-		)
-		return
+		return fmt.Errorf("failed to get WOL devices: %w", err)
 	}
 
+	var errs []error
 	for _, dev := range devices {
 		if err := p.c.SendWOLMagicPacket(ctx, dev.MacAddress); err != nil {
 			p.logger.Warn("failed to send WOL packet",
@@ -60,6 +64,10 @@ func (p *Provider) sendWakeOnLan(ctx context.Context) {
 				slog.String("mac", dev.MacAddress),
 				slog.String("name", dev.Name),
 				slog.String("error", err.Error()),
+			)
+			errs = append(
+				errs,
+				fmt.Errorf("WOL packet to %s (%s): %w", dev.Name, dev.MacAddress, err),
 			)
 		} else {
 			p.logger.Info("sent WOL magic packet",
@@ -69,6 +77,8 @@ func (p *Provider) sendWakeOnLan(ctx context.Context) {
 			)
 		}
 	}
+
+	return errors.Join(errs...)
 }
 
 // hasQueuedTasks reports whether any tasks are queued for the given power state.

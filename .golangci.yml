@@ -3,21 +3,22 @@ issues:
   max-same-issues: 0
 linters:
   enable:
+    - copyloopvar
     - durationcheck
     - errcheck
-    - copyloopvar
     - forcetypeassert
     - godot
+    - govet
     - ineffassign
     - makezero
     - misspell
     - nilerr
     - predeclared
     - staticcheck
+    - tagalign
     - unconvert
     - unparam
     - unused
-    - govet
 formatters:
   enable:
     - gci
