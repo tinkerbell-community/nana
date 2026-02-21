@@ -25,7 +25,10 @@ func generateKeyFromAPI(apiKey string) ([]byte, []byte, error) {
 
 	// 3. Generate the Ed25519 keypair
 	privateKey := ed25519.NewKeyFromSeed(hash[:])
-	publicKey := privateKey.Public().(ed25519.PublicKey)
+	publicKey, ok := privateKey.Public().(ed25519.PublicKey)
+	if !ok {
+		return nil, nil, fmt.Errorf("failed to derive public key from private key")
+	}
 
 	// 4. Marshal the keys (PEM and authorized_keys formats)
 	privBlock, err := ssh.MarshalPrivateKey(privateKey, "")
@@ -69,7 +72,7 @@ func ensureSSHKey(
 	mgmt.SSHKeys = append(mgmt.SSHKeys, settings.SettingMgmtSSHKeys{
 		Name:    "mgmt-api",
 		Key:     pubKeyStr,
-		KeyType: "ssh-ed25519",
+		KeyType: ssh.KeyAlgoED25519,
 		Comment: "auto-provisioned by mgmt-api",
 	})
 

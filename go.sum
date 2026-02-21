@@ -115,6 +115,14 @@ github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu
 github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
 github.com/subosito/gotenv v1.6.0 h1:9NlTDc1FTs4qu0DDq7AEtTPNw6SVm7uBMsUCUjABIf8=
 github.com/subosito/gotenv v1.6.0/go.mod h1:Dk4QP5c2W3ibzajGcXpNraDfq2IrhjMIvMSWPKKo0FU=
+github.com/ubiquiti-community/go-unifi v1.33.31 h1:hv0dbAKncil0E6I/QjKYQ6l2MvQjeIAuw7i7T+onuRs=
+github.com/ubiquiti-community/go-unifi v1.33.31/go.mod h1:oRmQLN4SG1UEqa19QJNqpoXzFCb1SZp0ELPlD7ktCJQ=
+github.com/ubiquiti-community/go-unifi v1.33.32 h1:xBXdsppP2O2aV2NBmduskBiVOA9Y79z6EbZ+2/AcVnk=
+github.com/ubiquiti-community/go-unifi v1.33.32/go.mod h1:oRmQLN4SG1UEqa19QJNqpoXzFCb1SZp0ELPlD7ktCJQ=
+github.com/ubiquiti-community/go-unifi v1.33.33 h1:ecsP/GYj4nFSr4JdlazzO88ZTnop2cF77i9MaaasbN0=
+github.com/ubiquiti-community/go-unifi v1.33.33/go.mod h1:oRmQLN4SG1UEqa19QJNqpoXzFCb1SZp0ELPlD7ktCJQ=
+github.com/ubiquiti-community/go-unifi v1.33.34 h1:jlJTL51tYujVNz2UJHJaoDLk70hvywkzlyv/RTOSnSI=
+github.com/ubiquiti-community/go-unifi v1.33.34/go.mod h1:oRmQLN4SG1UEqa19QJNqpoXzFCb1SZp0ELPlD7ktCJQ=
 github.com/ubiquiti-community/terraform-provider-unifi v0.41.12 h1:c9bV9t8sf/a0G/gvjYHUFG2ayeJ0jOkojQe3vNDNE+8=
 github.com/ubiquiti-community/terraform-provider-unifi v0.41.12/go.mod h1:Gnlw1JeBpx1giy2/+s2iY39tXm0VC+0/X38lilsbG1Y=
 github.com/vmihailenco/msgpack v4.0.4+incompatible h1:dSLoQfGFAo3F6OoNhwUmLwVgaUXK79GlxNBwueZn0xI=

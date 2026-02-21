@@ -24,9 +24,6 @@ type Config struct {
 
 	// Managed devices.
 	Devices []DeviceConfig `mapstructure:"devices" yaml:"devices"`
-
-	// SSH settings (used by providers that connect via SSH, e.g. unifi).
-	SSHKeyPath string `mapstructure:"ssh_key_path" yaml:"ssh_key_path"`
 }
 
 // DeviceConfig holds configuration for a managed BMC device.
@@ -54,20 +51,12 @@ type ProviderConfig struct {
 	// Password is the optional authentication credential.
 	Password string `mapstructure:"password" yaml:"password"`
 
-	// APIKey is the UniFi API key for SSH key provisioning. Used by SSH-based providers.
+	// APIKey is the UniFi API key. Used by the UniFi provider for both API access
+	// and deriving the SSH key used to connect to managed switches.
 	APIKey string `mapstructure:"api_key" yaml:"api_key"`
 
 	// Site is the UniFi site name (default: "default"). Used by UniFi providers.
 	Site string `mapstructure:"site" yaml:"site"`
-
-	// SSHPort is the SSH port (default: 22). Used by SSH-based providers.
-	SSHPort int `mapstructure:"ssh_port" yaml:"ssh_port"`
-
-	// SSHUsername is the SSH username (default: "root"). Used by SSH-based providers.
-	SSHUsername string `mapstructure:"ssh_username" yaml:"ssh_username"`
-
-	// SSHKeyPath overrides the global ssh_key_path for this providers.
-	SSHKeyPath string `mapstructure:"ssh_key_path" yaml:"ssh_key_path"`
 }
 
 var (

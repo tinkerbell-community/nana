@@ -207,7 +207,7 @@ func (c *Client) Login(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("login request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		var errResp map[string]string
@@ -235,7 +235,7 @@ func (c *Client) GetDeviceInfo(ctx context.Context) (*DeviceInfo, error) {
 	if err != nil {
 		return nil, fmt.Errorf("device info request failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("device info request failed with HTTP %d", resp.StatusCode)
@@ -354,7 +354,7 @@ func (c *Client) Connect(ctx context.Context) error {
 	// Read the initial device-metadata message.
 	var metadataMsg wsMessage
 	if err := wsjson.Read(ctx, ws, &metadataMsg); err != nil {
-		ws.Close(websocket.StatusNormalClosure, "")
+		_ = ws.Close(websocket.StatusNormalClosure, "")
 		_ = peerConnection.Close()
 		return fmt.Errorf("failed to read device metadata: %w", err)
 	}
@@ -365,7 +365,7 @@ func (c *Client) Connect(ctx context.Context) error {
 	localDesc := peerConnection.LocalDescription()
 	localDescJSON, err := json.Marshal(localDesc)
 	if err != nil {
-		ws.Close(websocket.StatusNormalClosure, "")
+		_ = ws.Close(websocket.StatusNormalClosure, "")
 		_ = peerConnection.Close()
 		return fmt.Errorf("failed to marshal local description: %w", err)
 	}
@@ -377,7 +377,7 @@ func (c *Client) Connect(ctx context.Context) error {
 		},
 	}
 	if err := wsjson.Write(ctx, ws, offerMsg); err != nil {
-		ws.Close(websocket.StatusNormalClosure, "")
+		_ = ws.Close(websocket.StatusNormalClosure, "")
 		_ = peerConnection.Close()
 		return fmt.Errorf("failed to send offer: %w", err)
 	}
@@ -387,7 +387,7 @@ func (c *Client) Connect(ctx context.Context) error {
 	for !answerReceived {
 		var msg wsMessage
 		if err := wsjson.Read(ctx, ws, &msg); err != nil {
-			ws.Close(websocket.StatusNormalClosure, "")
+			_ = ws.Close(websocket.StatusNormalClosure, "")
 			_ = peerConnection.Close()
 			return fmt.Errorf("failed to read WebSocket message: %w", err)
 		}
@@ -397,27 +397,27 @@ func (c *Client) Connect(ctx context.Context) error {
 			// The answer data is a base64-encoded JSON SessionDescription string.
 			var answerB64 string
 			if err := json.Unmarshal(msg.Data, &answerB64); err != nil {
-				ws.Close(websocket.StatusNormalClosure, "")
+				_ = ws.Close(websocket.StatusNormalClosure, "")
 				_ = peerConnection.Close()
 				return fmt.Errorf("failed to parse answer data: %w", err)
 			}
 
 			answerJSON, err := base64.StdEncoding.DecodeString(answerB64)
 			if err != nil {
-				ws.Close(websocket.StatusNormalClosure, "")
+				_ = ws.Close(websocket.StatusNormalClosure, "")
 				_ = peerConnection.Close()
 				return fmt.Errorf("failed to base64-decode answer: %w", err)
 			}
 
 			var answer webrtc.SessionDescription
 			if err := json.Unmarshal(answerJSON, &answer); err != nil {
-				ws.Close(websocket.StatusNormalClosure, "")
+				_ = ws.Close(websocket.StatusNormalClosure, "")
 				_ = peerConnection.Close()
 				return fmt.Errorf("failed to parse answer SDP: %w", err)
 			}
 
 			if err := peerConnection.SetRemoteDescription(answer); err != nil {
-				ws.Close(websocket.StatusNormalClosure, "")
+				_ = ws.Close(websocket.StatusNormalClosure, "")
 				_ = peerConnection.Close()
 				return fmt.Errorf("failed to set remote description: %w", err)
 			}
@@ -440,7 +440,7 @@ func (c *Client) Connect(ctx context.Context) error {
 
 	// Start a goroutine to handle ongoing ICE candidates from WebSocket.
 	go func() {
-		defer ws.Close(websocket.StatusNormalClosure, "")
+		defer func() { _ = ws.Close(websocket.StatusNormalClosure, "") }()
 		for {
 			var msg wsMessage
 			if err := wsjson.Read(context.Background(), ws, &msg); err != nil {

@@ -32,8 +32,8 @@ func (p *sshConnectionPool) get(addr string, config *ssh.ClientConfig) (*ssh.Cli
 	p.mu.Lock()
 	if existing, ok := p.conns[addr]; ok {
 		p.mu.Unlock()
-		c.Close()
-		return existing, nil
+		err = c.Close()
+		return existing, err
 	}
 	p.conns[addr] = c
 	p.mu.Unlock()
@@ -47,7 +47,7 @@ func (p *sshConnectionPool) remove(addr string) {
 	defer p.mu.Unlock()
 
 	if c, ok := p.conns[addr]; ok {
-		c.Close()
+		_ = c.Close()
 		delete(p.conns, addr)
 	}
 }

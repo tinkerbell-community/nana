@@ -7,11 +7,9 @@ require (
 	github.com/pion/webrtc/v4 v4.0.10
 	github.com/spf13/cobra v1.10.1
 	github.com/spf13/viper v1.19.0
-	github.com/ubiquiti-community/go-unifi v1.33.31
+	github.com/ubiquiti-community/go-unifi v1.33.34
 	golang.org/x/crypto v0.47.0
 )
-
-replace github.com/ubiquiti-community/go-unifi => ../../ubiquiti-community/go-unifi
 
 require (
 	github.com/fsnotify/fsnotify v1.7.0 // indirect

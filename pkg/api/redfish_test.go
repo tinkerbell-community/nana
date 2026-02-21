@@ -62,9 +62,12 @@ func TestRedfish_Systems(t *testing.T) {
 
 	var body map[string]any
 	_ = json.Unmarshal(w.Body.Bytes(), &body)
-	members := body["Members"].([]any)
-	if len(members) != 2 {
-		t.Errorf("expected 2 members, got %d", len(members))
+	if members, ok := body["Members"].([]any); ok {
+		if len(members) != 2 {
+			t.Errorf("expected 2 members, got %d", len(members))
+		}
+	} else {
+		t.Errorf("Members field missing or of wrong type")
 	}
 }
 
@@ -190,8 +193,7 @@ func TestRedfish_VirtualMediaCollection(t *testing.T) {
 
 	var body map[string]any
 	_ = json.Unmarshal(w.Body.Bytes(), &body)
-	count := body["Members@odata.count"].(float64)
-	if count != 1 {
+	if count, ok := body["Members@odata.count"].(float64); ok && count != 1 {
 		t.Errorf("expected 1 member, got %v", count)
 	}
 }
@@ -265,10 +267,11 @@ func TestRedfish_Managers(t *testing.T) {
 
 	var body map[string]any
 	_ = json.Unmarshal(w.Body.Bytes(), &body)
-	members := body["Members"].([]any)
-	// Only server-01 has BMCInfo capability.
-	if len(members) != 1 {
-		t.Errorf("expected 1 manager, got %d", len(members))
+	if members, ok := body["Members"].([]any); ok {
+		// Only server-01 has BMCInfo capability.
+		if len(members) != 1 {
+			t.Errorf("expected 1 manager, got %d", len(members))
+		}
 	}
 }
 

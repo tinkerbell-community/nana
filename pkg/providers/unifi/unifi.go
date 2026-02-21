@@ -10,7 +10,6 @@ import (
 	"encoding/csv"
 	"fmt"
 	"net"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -56,13 +55,12 @@ type uplinkInfo struct {
 // Provider implements the providers.Provider and providers.PowerController
 // interfaces for devices powered via UniFi switch PoE ports.
 type Provider struct {
-	apiURL       string
-	apiKey       string
-	site         string
-	mac          string
-	sshConfig    *ssh.ClientConfig
-	sshPort      int
-	provisionSSH bool // whether to provision SSH key via API
+	apiURL    string
+	apiKey    string
+	site      string
+	mac       string
+	sshConfig *ssh.ClientConfig
+	sshPort   int
 
 	mu     sync.Mutex
 	client *unifi.ApiClient
@@ -89,65 +87,22 @@ func newProvider(cfg map[string]any) (providers.Provider, error) {
 		return nil, fmt.Errorf("unifi provider requires 'mac' config")
 	}
 
-	username, _ := cfg["ssh_username"].(string)
-	if username == "" {
-		username = "root"
-	}
-
-	sshPort := 22
-	if p, ok := cfg["ssh_port"].(int); ok && p > 0 {
-		sshPort = p
-	}
-	// Viper may deserialize YAML ints as float64 through map[string]interface{}.
-	if p, ok := cfg["ssh_port"].(float64); ok && p > 0 {
-		sshPort = int(p)
-	}
-
 	site, _ := cfg["site"].(string)
 	if site == "" {
 		site = "default"
 	}
 
-	sshKeyPath, _ := cfg["ssh_key_path"].(string)
-
-	var signer ssh.Signer
-	provisionSSH := false
-
-	switch {
-	case sshKeyPath != "":
-		// Expand ~ in path.
-		if strings.HasPrefix(sshKeyPath, "~/") {
-			home, err := os.UserHomeDir()
-			if err == nil {
-				sshKeyPath = home + sshKeyPath[1:]
-			}
-		}
-
-		privateKey, err := os.ReadFile(sshKeyPath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read SSH private key %s: %w", sshKeyPath, err)
-		}
-
-		signer, err = ssh.ParsePrivateKey(privateKey)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse SSH private key: %w", err)
-		}
-
-	default:
-		// Generate SSH key from API key.
-		privatePEM, _, err := generateKeyFromAPI(apiKey)
-		if err != nil {
-			return nil, fmt.Errorf("failed to generate SSH key from API key: %w", err)
-		}
-		signer, err = ssh.ParsePrivateKey(privatePEM)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse generated SSH private key: %w", err)
-		}
-		provisionSSH = true
+	privatePEM, _, err := generateKeyFromAPI(apiKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate SSH key from API key: %w", err)
+	}
+	signer, err := ssh.ParsePrivateKey(privatePEM)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse generated SSH private key: %w", err)
 	}
 
 	sshConfig := &ssh.ClientConfig{
-		User: username,
+		User: "root",
 		Auth: []ssh.AuthMethod{
 			ssh.PublicKeys(signer),
 		},
@@ -156,13 +111,12 @@ func newProvider(cfg map[string]any) (providers.Provider, error) {
 	}
 
 	return &Provider{
-		apiURL:       apiURL,
-		apiKey:       apiKey,
-		site:         site,
-		mac:          mac,
-		sshConfig:    sshConfig,
-		sshPort:      sshPort,
-		provisionSSH: provisionSSH,
+		apiURL:    apiURL,
+		apiKey:    apiKey,
+		site:      site,
+		mac:       mac,
+		sshConfig: sshConfig,
+		sshPort:   22,
 	}, nil
 }
 
@@ -182,15 +136,13 @@ func (p *Provider) Open(ctx context.Context) error {
 	}
 	p.client = client
 
-	if p.provisionSSH {
-		_, publicAuthorizedKey, err := generateKeyFromAPI(p.apiKey)
-		if err != nil {
-			return fmt.Errorf("failed to generate SSH public key: %w", err)
-		}
+	_, publicAuthorizedKey, err := generateKeyFromAPI(p.apiKey)
+	if err != nil {
+		return fmt.Errorf("failed to generate SSH public key: %w", err)
+	}
 
-		if err := ensureSSHKey(ctx, p.client, p.site, publicAuthorizedKey); err != nil {
-			return fmt.Errorf("failed to ensure SSH key on UniFi device: %w", err)
-		}
+	if err := ensureSSHKey(ctx, p.client, p.site, publicAuthorizedKey); err != nil {
+		return fmt.Errorf("failed to ensure SSH key on UniFi device: %w", err)
 	}
 
 	return nil
@@ -284,7 +236,7 @@ func (p *Provider) sshExec(ctx context.Context, host, command string) (string, e
 	if err != nil {
 		return "", fmt.Errorf("failed to create SSH session: %w", err)
 	}
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 
 	done := make(chan error, 1)
 	var output []byte
@@ -309,7 +261,10 @@ func (p *Provider) sshExec(ctx context.Context, host, command string) (string, e
 
 // executeOnSwitch resolves the uplink, executes a command on the upstream switch,
 // and retries once on SSH failure after invalidating the cache.
-func (p *Provider) executeOnSwitch(ctx context.Context, buildCmd func(port int) string) (string, int, error) {
+func (p *Provider) executeOnSwitch(
+	ctx context.Context,
+	buildCmd func(port int) string,
+) (string, int, error) {
 	uplink, err := p.resolveUplink(ctx)
 	if err != nil {
 		return "", 0, err
