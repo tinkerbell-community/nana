@@ -56,6 +56,18 @@ func (rw *responseWriter) WriteHeader(code int) {
 func buildDeviceManager(cfg *config.Config, logger *slog.Logger) (*providers.DeviceManager, error) {
 	dm := providers.NewDeviceManager()
 
+	return dm, buildDevices(cfg, dm, logger)
+}
+
+func toAnySlice(ss []string) []any {
+	out := make([]any, len(ss))
+	for i, s := range ss {
+		out[i] = s
+	}
+	return out
+}
+
+func buildDevices(cfg *config.Config, dm *providers.DeviceManager, logger *slog.Logger) error {
 	for i, devCfg := range cfg.Devices {
 		var p []providers.Provider
 		for j, prvCfg := range devCfg.Providers {
@@ -75,10 +87,29 @@ func buildDeviceManager(cfg *config.Config, logger *slog.Logger) (*providers.Dev
 			if prvCfg.Site != "" {
 				prvMap["site"] = prvCfg.Site
 			}
+			if len(prvCfg.Boot) > 0 {
+				bootList := make([]any, len(prvCfg.Boot))
+				for bi, bc := range prvCfg.Boot {
+					stepsList := make([]any, len(bc.Steps))
+					for si, step := range bc.Steps {
+						stepsList[si] = map[string]any{
+							"keys":      toAnySlice(step.Keys),
+							"modifiers": toAnySlice(step.Modifiers),
+							"delay":     step.Delay,
+						}
+					}
+					bootList[bi] = map[string]any{
+						"device": bc.Device,
+						"delay":  bc.Delay,
+						"steps":  stepsList,
+					}
+				}
+				prvMap["boot"] = bootList
+			}
 
 			prv, err := providers.Create(prvCfg.Type, prvMap)
 			if err != nil {
-				return nil, fmt.Errorf("device[%d].providers[%d] (%s): %w", i, j, prvCfg.Type, err)
+				return fmt.Errorf("device[%d].providers[%d] (%s): %w", i, j, prvCfg.Type, err)
 			}
 			p = append(p, prv)
 
@@ -109,7 +140,7 @@ func buildDeviceManager(cfg *config.Config, logger *slog.Logger) (*providers.Dev
 		)
 	}
 
-	return dm, nil
+	return nil
 }
 
 var rootCmd = &cobra.Command{

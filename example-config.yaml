@@ -31,6 +31,19 @@ devices:
       - type: "jetkvm"
         host: "192.168.1.101"
         password: "secret"
+        # Boot device macros: keyboard sequences to select boot devices.
+        # Each entry maps a boot device name to a sequence of keyboard steps.
+        # The optional top-level delay waits after power-on before starting.
+        boot:
+          - device: "pxe"
+            delay: 1s
+            steps:
+              - keys: ["f12"]
+                delay: 2s
+              - keys: ["down"]
+                delay: 500ms
+              - keys: ["enter"]
+                delay: 1s
 
   # Example: device powered via UniFi switch PoE.
   # The unifi provider connects to the switch over SSH and discovers

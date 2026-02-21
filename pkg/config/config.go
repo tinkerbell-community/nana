@@ -40,6 +40,20 @@ type DeviceConfig struct {
 	Providers []ProviderConfig `mapstructure:"providers" yaml:"providers"`
 }
 
+// BootMacroStepConfig defines a single keyboard input step within a boot macro.
+type BootMacroStepConfig struct {
+	Keys      []string `mapstructure:"keys"      yaml:"keys"`
+	Modifiers []string `mapstructure:"modifiers" yaml:"modifiers"`
+	Delay     string   `mapstructure:"delay"     yaml:"delay"`
+}
+
+// BootDeviceConfig defines the keyboard macro sequence for a boot device option.
+type BootDeviceConfig struct {
+	Device string              `mapstructure:"device" yaml:"device"`
+	Delay  string              `mapstructure:"delay"  yaml:"delay"`
+	Steps  []BootMacroStepConfig `mapstructure:"steps"  yaml:"steps"`
+}
+
 // ProviderConfig holds configuration for a single provider instance.
 type ProviderConfig struct {
 	// Type is the provider type name (e.g., "jetkvm", "unifi").
@@ -57,6 +71,9 @@ type ProviderConfig struct {
 
 	// Site is the UniFi site name (default: "default"). Used by UniFi providers.
 	Site string `mapstructure:"site" yaml:"site"`
+
+	// Boot defines keyboard macro sequences for boot device selection.
+	Boot []BootDeviceConfig `mapstructure:"boot" yaml:"boot"`
 }
 
 var (

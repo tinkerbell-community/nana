@@ -31,6 +31,8 @@ func (p *Provider) SetPowerState(ctx context.Context, state string) error {
 		p.sendWakeOnLan(ctx)
 	}
 
+	p.drainQueue(ctx, state)
+
 	return nil
 }
 

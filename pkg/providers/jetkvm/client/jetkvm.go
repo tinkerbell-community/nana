@@ -909,6 +909,41 @@ func (c *Client) SendWOLMagicPacket(ctx context.Context, macAddress string) erro
 	return nil
 }
 
+// --- Keyboard Macros ---
+
+// KeyboardMacroStep defines a single step in a keyboard macro.
+// Keys and Modifiers are string names (e.g. "enter", "ctrl").
+// Delay is the pause in milliseconds after this step is sent.
+type KeyboardMacroStep struct {
+	Keys      []string `json:"keys"`
+	Modifiers []string `json:"modifiers"`
+	Delay     int      `json:"delay"`
+}
+
+// ExecuteKeyboardMacro sends a keyboard macro to the JetKVM device for execution.
+// The device processes each step sequentially, sending key reports and waiting
+// for the specified delay between steps.
+func (c *Client) ExecuteKeyboardMacro(ctx context.Context, steps []KeyboardMacroStep) error {
+	// Convert steps to a generic representation for the JSON-RPC call.
+	stepsParam := make([]map[string]any, len(steps))
+	for i, s := range steps {
+		stepsParam[i] = map[string]any{
+			"keys":      s.Keys,
+			"modifiers": s.Modifiers,
+			"delay":     s.Delay,
+		}
+	}
+
+	resp, err := c.Call(ctx, "executeKeyboardMacro", map[string]any{"steps": stepsParam})
+	if err != nil {
+		return err
+	}
+	if resp.Error != nil {
+		return fmt.Errorf("RPC error: %v", resp.Error)
+	}
+	return nil
+}
+
 // --- EDID ---
 
 // GetEDID returns the current EDID string.
