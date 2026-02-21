@@ -27,6 +27,8 @@ type Provider struct {
 	host       string
 	sshPort    int
 	mac        string // device MAC for port auto-discovery
+	apiKey     string // UniFi API key for SSH key provisioning
+	site       string // UniFi site name (default: "default")
 	mu         sync.Mutex
 	cachedPort int // 0 = not yet resolved
 }
@@ -39,19 +41,6 @@ func newProvider(cfg map[string]any) (providers.Provider, error) {
 	host, _ := cfg["host"].(string)
 	if host == "" {
 		return nil, fmt.Errorf("unifi provider requires 'host' config")
-	}
-
-	sshKeyPath, _ := cfg["ssh_key_path"].(string)
-	if sshKeyPath == "" {
-		return nil, fmt.Errorf("unifi provider requires 'ssh_key_path' config")
-	}
-
-	// Expand ~ in path.
-	if strings.HasPrefix(sshKeyPath, "~/") {
-		home, err := os.UserHomeDir()
-		if err == nil {
-			sshKeyPath = home + sshKeyPath[1:]
-		}
 	}
 
 	username, _ := cfg["ssh_username"].(string)
@@ -70,15 +59,49 @@ func newProvider(cfg map[string]any) (providers.Provider, error) {
 
 	mac, _ := cfg["mac"].(string)
 
-	// Read and parse the SSH private key.
-	privateKey, err := os.ReadFile(sshKeyPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read SSH private key %s: %w", sshKeyPath, err)
+	site, _ := cfg["site"].(string)
+	if site == "" {
+		site = "default"
 	}
 
-	signer, err := ssh.ParsePrivateKey(privateKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse SSH private key: %w", err)
+	apiKey, _ := cfg["api_key"].(string)
+	sshKeyPath, _ := cfg["ssh_key_path"].(string)
+
+	var signer ssh.Signer
+
+	switch {
+	case apiKey != "":
+		// Generate SSH key from API key.
+		privatePEM, _, err := GenerateKeyFromAPI(apiKey)
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate SSH key from API key: %w", err)
+		}
+		signer, err = ssh.ParsePrivateKey(privatePEM)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse generated SSH private key: %w", err)
+		}
+
+	case sshKeyPath != "":
+		// Expand ~ in path.
+		if strings.HasPrefix(sshKeyPath, "~/") {
+			home, err := os.UserHomeDir()
+			if err == nil {
+				sshKeyPath = home + sshKeyPath[1:]
+			}
+		}
+
+		privateKey, err := os.ReadFile(sshKeyPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read SSH private key %s: %w", sshKeyPath, err)
+		}
+
+		signer, err = ssh.ParsePrivateKey(privateKey)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse SSH private key: %w", err)
+		}
+
+	default:
+		return nil, fmt.Errorf("unifi provider requires 'api_key' or 'ssh_key_path' config")
 	}
 
 	sshConfig := &ssh.ClientConfig{
@@ -95,6 +118,8 @@ func newProvider(cfg map[string]any) (providers.Provider, error) {
 		host:      host,
 		sshPort:   sshPort,
 		mac:       mac,
+		apiKey:    apiKey,
+		site:      site,
 	}, nil
 }
 
@@ -106,8 +131,24 @@ func (p *Provider) Capabilities() []providers.Capability {
 	return []providers.Capability{providers.CapPowerControl}
 }
 
-// Open is a no-op; SSH connections are made per-command.
-func (p *Provider) Open(_ context.Context) error { return nil }
+// Open ensures the SSH key is provisioned on the UniFi device when using API key auth.
+func (p *Provider) Open(ctx context.Context) error {
+	if p.apiKey == "" {
+		return nil
+	}
+
+	_, publicAuthorizedKey, err := GenerateKeyFromAPI(p.apiKey)
+	if err != nil {
+		return fmt.Errorf("failed to generate SSH public key: %w", err)
+	}
+
+	baseURL := fmt.Sprintf("https://%s", p.host)
+	if err := ensureSSHKey(ctx, baseURL, p.apiKey, p.site, publicAuthorizedKey); err != nil {
+		return fmt.Errorf("failed to ensure SSH key on UniFi device: %w", err)
+	}
+
+	return nil
+}
 
 // Close is a no-op; SSH connections are made per-command.
 func (p *Provider) Close() error { return nil }

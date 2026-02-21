@@ -75,6 +75,12 @@ func buildDeviceManager(cfg *config.Config, logger *slog.Logger) (*providers.Dev
 			if prvCfg.SSHUsername != "" {
 				prvMap["ssh_username"] = prvCfg.SSHUsername
 			}
+			if prvCfg.APIKey != "" {
+				prvMap["api_key"] = prvCfg.APIKey
+			}
+			if prvCfg.Site != "" {
+				prvMap["site"] = prvCfg.Site
+			}
 			// Provider-level ssh_key_path overrides global.
 			sshKeyPath := prvCfg.SSHKeyPath
 			if sshKeyPath == "" {

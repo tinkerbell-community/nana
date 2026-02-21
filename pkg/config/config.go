@@ -54,6 +54,12 @@ type ProviderConfig struct {
 	// Password is the optional authentication credential.
 	Password string `mapstructure:"password" yaml:"password"`
 
+	// APIKey is the UniFi API key for SSH key provisioning. Used by SSH-based providers.
+	APIKey string `mapstructure:"api_key" yaml:"api_key"`
+
+	// Site is the UniFi site name (default: "default"). Used by UniFi providers.
+	Site string `mapstructure:"site" yaml:"site"`
+
 	// SSHPort is the SSH port (default: 22). Used by SSH-based providers.
 	SSHPort int `mapstructure:"ssh_port" yaml:"ssh_port"`
 
