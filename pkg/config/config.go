@@ -16,7 +16,7 @@ import (
 // Config holds the server and device configuration.
 type Config struct {
 	// Server settings.
-	Port    int    `mapstructure:"port" yaml:"port"`
+	Port    int    `mapstructure:"port"    yaml:"port"`
 	Address string `mapstructure:"address" yaml:"address"`
 
 	// WebRTC settings (used by JetKVM driver).
@@ -96,7 +96,8 @@ func InitConfig() {
 
 // InitFlags binds CLI flags to Viper configuration keys.
 func InitFlags(cmd *cobra.Command) {
-	cmd.PersistentFlags().StringVar(&cfgFile, "config", "", "Config file path (default: ./jetkvm-api.yaml)")
+	cmd.PersistentFlags().
+		StringVar(&cfgFile, "config", "", "Config file path (default: ./jetkvm-api.yaml)")
 	cmd.Flags().Int("port", 5000, "HTTP server port")
 	cmd.Flags().String("address", "0.0.0.0", "HTTP server bind address")
 	cmd.Flags().Int("webrtc-timeout", 30, "WebRTC connection timeout in seconds")

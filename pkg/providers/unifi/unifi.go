@@ -35,7 +35,7 @@ func init() {
 	providers.Register("unifi", newProvider)
 }
 
-func newProvider(cfg map[string]interface{}) (providers.Provider, error) {
+func newProvider(cfg map[string]any) (providers.Provider, error) {
 	host, _ := cfg["host"].(string)
 	if host == "" {
 		return nil, fmt.Errorf("unifi provider requires 'host' config")
@@ -256,7 +256,8 @@ func parsePoEStatus(output string) (*poeStatus, error) {
 
 		// PoEPwr field position depends on whether Class is two words.
 		classIdx := 4
-		if classIdx < len(nonEmpty) && strings.HasPrefix(nonEmpty[classIdx], "Class") && classIdx+1 < len(nonEmpty) {
+		if classIdx < len(nonEmpty) && strings.HasPrefix(nonEmpty[classIdx], "Class") &&
+			classIdx+1 < len(nonEmpty) {
 			classIdx++
 		}
 		if classIdx+1 < len(nonEmpty) {

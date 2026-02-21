@@ -39,7 +39,7 @@ func TestRedfish_ServiceRoot(t *testing.T) {
 		t.Errorf("expected %d, got %d", http.StatusOK, w.Code)
 	}
 
-	var body map[string]interface{}
+	var body map[string]any
 	_ = json.Unmarshal(w.Body.Bytes(), &body)
 	if body["Id"] != "RootService" {
 		t.Errorf("expected Id 'RootService', got %v", body["Id"])
@@ -60,9 +60,9 @@ func TestRedfish_Systems(t *testing.T) {
 		t.Errorf("expected %d, got %d", http.StatusOK, w.Code)
 	}
 
-	var body map[string]interface{}
+	var body map[string]any
 	_ = json.Unmarshal(w.Body.Bytes(), &body)
-	members := body["Members"].([]interface{})
+	members := body["Members"].([]any)
 	if len(members) != 2 {
 		t.Errorf("expected 2 members, got %d", len(members))
 	}
@@ -82,7 +82,7 @@ func TestRedfish_System_ByName(t *testing.T) {
 		t.Errorf("expected %d, got %d", http.StatusOK, w.Code)
 	}
 
-	var body map[string]interface{}
+	var body map[string]any
 	_ = json.Unmarshal(w.Body.Bytes(), &body)
 	if body["Id"] != "server-01" {
 		t.Errorf("expected Id 'server-01', got %v", body["Id"])
@@ -106,7 +106,7 @@ func TestRedfish_System_ByMAC(t *testing.T) {
 		t.Errorf("expected %d, got %d", http.StatusOK, w.Code)
 	}
 
-	var body map[string]interface{}
+	var body map[string]any
 	_ = json.Unmarshal(w.Body.Bytes(), &body)
 	if body["PowerState"] != "Off" {
 		t.Errorf("expected PowerState 'Off', got %v", body["PowerState"])
@@ -135,7 +135,11 @@ func TestRedfish_SystemReset(t *testing.T) {
 	RegisterRedfishRoutes(mux, svc)
 
 	payload, _ := json.Marshal(map[string]string{"ResetType": "ForceOff"})
-	req := httptest.NewRequest("POST", "/redfish/v1/Systems/server-01/Actions/ComputerSystem.Reset", bytes.NewReader(payload))
+	req := httptest.NewRequest(
+		"POST",
+		"/redfish/v1/Systems/server-01/Actions/ComputerSystem.Reset",
+		bytes.NewReader(payload),
+	)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -156,7 +160,11 @@ func TestRedfish_SystemReset_InvalidType(t *testing.T) {
 	RegisterRedfishRoutes(mux, svc)
 
 	payload, _ := json.Marshal(map[string]string{"ResetType": "InvalidType"})
-	req := httptest.NewRequest("POST", "/redfish/v1/Systems/server-01/Actions/ComputerSystem.Reset", bytes.NewReader(payload))
+	req := httptest.NewRequest(
+		"POST",
+		"/redfish/v1/Systems/server-01/Actions/ComputerSystem.Reset",
+		bytes.NewReader(payload),
+	)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -180,7 +188,7 @@ func TestRedfish_VirtualMediaCollection(t *testing.T) {
 		t.Errorf("expected %d, got %d", http.StatusOK, w.Code)
 	}
 
-	var body map[string]interface{}
+	var body map[string]any
 	_ = json.Unmarshal(w.Body.Bytes(), &body)
 	count := body["Members@odata.count"].(float64)
 	if count != 1 {
@@ -210,11 +218,15 @@ func TestRedfish_VirtualMedia_InsertEject(t *testing.T) {
 	RegisterRedfishRoutes(mux, svc)
 
 	// Insert media.
-	payload, _ := json.Marshal(map[string]interface{}{
+	payload, _ := json.Marshal(map[string]any{
 		"Image":    "http://example.com/boot.iso",
 		"Inserted": true,
 	})
-	req := httptest.NewRequest("POST", "/redfish/v1/Systems/server-01/VirtualMedia/1/Actions/VirtualMedia.InsertMedia", bytes.NewReader(payload))
+	req := httptest.NewRequest(
+		"POST",
+		"/redfish/v1/Systems/server-01/VirtualMedia/1/Actions/VirtualMedia.InsertMedia",
+		bytes.NewReader(payload),
+	)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -227,7 +239,11 @@ func TestRedfish_VirtualMedia_InsertEject(t *testing.T) {
 	}
 
 	// Eject media.
-	req = httptest.NewRequest("POST", "/redfish/v1/Systems/server-01/VirtualMedia/1/Actions/VirtualMedia.EjectMedia", nil)
+	req = httptest.NewRequest(
+		"POST",
+		"/redfish/v1/Systems/server-01/VirtualMedia/1/Actions/VirtualMedia.EjectMedia",
+		nil,
+	)
 	w = httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 
@@ -247,9 +263,9 @@ func TestRedfish_Managers(t *testing.T) {
 		t.Errorf("expected %d, got %d", http.StatusOK, w.Code)
 	}
 
-	var body map[string]interface{}
+	var body map[string]any
 	_ = json.Unmarshal(w.Body.Bytes(), &body)
-	members := body["Members"].([]interface{})
+	members := body["Members"].([]any)
 	// Only server-01 has BMCInfo capability.
 	if len(members) != 1 {
 		t.Errorf("expected 1 manager, got %d", len(members))
@@ -270,7 +286,7 @@ func TestRedfish_Manager(t *testing.T) {
 		t.Errorf("expected %d, got %d", http.StatusOK, w.Code)
 	}
 
-	var body map[string]interface{}
+	var body map[string]any
 	_ = json.Unmarshal(w.Body.Bytes(), &body)
 	if body["ManagerType"] != "BMC" {
 		t.Errorf("expected ManagerType 'BMC', got %v", body["ManagerType"])

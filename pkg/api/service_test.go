@@ -16,18 +16,18 @@ import (
 
 // mockTestDriver implements all provider capability interfaces for testing.
 type mockTestDriver struct {
-	powerState string
-	mediaState *providers.VirtualMediaState
-	bmcVersion string
-	bootDevice string
-	caps       []providers.Capability
+	powerState  string
+	mediaState  *providers.VirtualMediaState
+	bmcVersion  string
+	bootDevice  string
+	caps        []providers.Capability
 	setPowerErr error
 }
 
-func (m *mockTestDriver) Name() string                       { return "mock" }
-func (m *mockTestDriver) Capabilities() []providers.Capability   { return m.caps }
-func (m *mockTestDriver) Open(_ context.Context) error        { return nil }
-func (m *mockTestDriver) Close() error                        { return nil }
+func (m *mockTestDriver) Name() string                         { return "mock" }
+func (m *mockTestDriver) Capabilities() []providers.Capability { return m.caps }
+func (m *mockTestDriver) Open(_ context.Context) error         { return nil }
+func (m *mockTestDriver) Close() error                         { return nil }
 
 func (m *mockTestDriver) GetPowerState(_ context.Context) (string, error) {
 	return m.powerState, nil
@@ -62,7 +62,11 @@ func (m *mockTestDriver) GetBMCVersion(_ context.Context) (string, error) {
 	return m.bmcVersion, nil
 }
 
-func (m *mockTestDriver) SetBootDevice(_ context.Context, device string, persistent, efiBoot bool) error {
+func (m *mockTestDriver) SetBootDevice(
+	_ context.Context,
+	device string,
+	persistent, efiBoot bool,
+) error {
 	m.bootDevice = device
 	return nil
 }
@@ -97,7 +101,12 @@ func newTestRPCService() (RpcService, *mockTestDriver) {
 	return svc, mockDrv
 }
 
-func doRPC(t *testing.T, svc RpcService, device string, payload RequestPayload) *httptest.ResponseRecorder {
+func doRPC(
+	t *testing.T,
+	svc RpcService,
+	device string,
+	payload RequestPayload,
+) *httptest.ResponseRecorder {
 	t.Helper()
 	body, _ := json.Marshal(payload)
 	req := httptest.NewRequest("POST", "/rpc", bytes.NewReader(body))
@@ -165,7 +174,7 @@ func TestRpcHandler_SetPowerState(t *testing.T) {
 	payload := RequestPayload{
 		Method: PowerSetMethod,
 		ID:     2,
-		Params: map[string]interface{}{"state": "off"},
+		Params: map[string]any{"state": "off"},
 	}
 	w := doRPC(t, svc, "server-01", payload)
 
@@ -184,7 +193,7 @@ func TestRpcHandler_SetVirtualMedia(t *testing.T) {
 	payload := RequestPayload{
 		Method: VirtualMediaMethod,
 		ID:     3,
-		Params: map[string]interface{}{"mediaUrl": "http://example.com/boot.iso", "kind": "cdrom"},
+		Params: map[string]any{"mediaUrl": "http://example.com/boot.iso", "kind": "cdrom"},
 	}
 	w := doRPC(t, svc, "server-01", payload)
 
@@ -199,12 +208,15 @@ func TestRpcHandler_SetVirtualMedia(t *testing.T) {
 
 func TestRpcHandler_SetVirtualMedia_Unmount(t *testing.T) {
 	svc, mockDrv := newTestRPCService()
-	mockDrv.mediaState = &providers.VirtualMediaState{Inserted: true, Image: "http://example.com/boot.iso"}
+	mockDrv.mediaState = &providers.VirtualMediaState{
+		Inserted: true,
+		Image:    "http://example.com/boot.iso",
+	}
 
 	payload := RequestPayload{
 		Method: VirtualMediaMethod,
 		ID:     4,
-		Params: map[string]interface{}{"mediaUrl": ""},
+		Params: map[string]any{"mediaUrl": ""},
 	}
 	w := doRPC(t, svc, "server-01", payload)
 
@@ -219,7 +231,7 @@ func TestRpcHandler_BootDevice(t *testing.T) {
 	payload := RequestPayload{
 		Method: BootDeviceMethod,
 		ID:     5,
-		Params: map[string]interface{}{"device": "pxe", "persistent": false, "efiBoot": true},
+		Params: map[string]any{"device": "pxe", "persistent": false, "efiBoot": true},
 	}
 	w := doRPC(t, svc, "server-01", payload)
 

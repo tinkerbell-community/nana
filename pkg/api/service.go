@@ -49,7 +49,10 @@ func (s *rpcService) getDeviceByHost(host string) (*providers.ManagedDevice, err
 	return models.ResolveDeviceByID(host, s.dm)
 }
 
-func (s *rpcService) getPowerState(ctx context.Context, dev *providers.ManagedDevice) (string, error) {
+func (s *rpcService) getPowerState(
+	ctx context.Context,
+	dev *providers.ManagedDevice,
+) (string, error) {
 	pc := dev.PowerController()
 	if pc == nil {
 		return "", fmt.Errorf("device does not support power control")
@@ -57,7 +60,11 @@ func (s *rpcService) getPowerState(ctx context.Context, dev *providers.ManagedDe
 	return pc.GetPowerState(ctx)
 }
 
-func (s *rpcService) setPowerState(ctx context.Context, dev *providers.ManagedDevice, state string) error {
+func (s *rpcService) setPowerState(
+	ctx context.Context,
+	dev *providers.ManagedDevice,
+	state string,
+) error {
 	pc := dev.PowerController()
 	if pc == nil {
 		return fmt.Errorf("device does not support power control")
@@ -371,7 +378,11 @@ func writeResponse(w http.ResponseWriter, rp ResponsePayload) {
 }
 
 // NewBMCService creates a new RPC service for BMC-compatible management.
-func NewBMCService(dm *providers.DeviceManager, rpcTimeout time.Duration, logger *slog.Logger) RpcService {
+func NewBMCService(
+	dm *providers.DeviceManager,
+	rpcTimeout time.Duration,
+	logger *slog.Logger,
+) RpcService {
 	if rpcTimeout == 0 {
 		rpcTimeout = 30 * time.Second
 	}

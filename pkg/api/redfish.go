@@ -123,7 +123,7 @@ func (s *redfishService) resolveSystem(r *http.Request) (*providers.ManagedDevic
 	return dev, nil
 }
 
-// ServiceRoot handles GET /redfish/v1/
+// ServiceRoot handles GET /redfish/v1/.
 func (s *redfishService) ServiceRoot(w http.ResponseWriter, _ *http.Request) {
 	body := map[string]any{
 		"@odata.type":    "#ServiceRoot.v1_5_0.ServiceRoot",
@@ -139,7 +139,7 @@ func (s *redfishService) ServiceRoot(w http.ResponseWriter, _ *http.Request) {
 	writeRedfishJSON(w, http.StatusOK, body)
 }
 
-// Systems handles GET /redfish/v1/Systems
+// Systems handles GET /redfish/v1/Systems.
 func (s *redfishService) Systems(w http.ResponseWriter, _ *http.Request) {
 	devices := s.dm.AllDevices()
 	members := make([]odataID, 0, len(devices))
@@ -165,7 +165,7 @@ func (s *redfishService) Systems(w http.ResponseWriter, _ *http.Request) {
 	writeRedfishJSON(w, http.StatusOK, body)
 }
 
-// System handles GET /redfish/v1/Systems/{systemId}
+// System handles GET /redfish/v1/Systems/{systemId}.
 func (s *redfishService) System(w http.ResponseWriter, r *http.Request) {
 	dev, err := s.resolveSystem(r)
 	if err != nil {
@@ -223,7 +223,7 @@ func (s *redfishService) System(w http.ResponseWriter, r *http.Request) {
 	writeRedfishJSON(w, http.StatusOK, body)
 }
 
-// SystemReset handles POST /redfish/v1/Systems/{systemId}/Actions/ComputerSystem.Reset
+// SystemReset handles POST /redfish/v1/Systems/{systemId}/Actions/ComputerSystem.Reset.
 func (s *redfishService) SystemReset(w http.ResponseWriter, r *http.Request) {
 	dev, err := s.resolveSystem(r)
 	if err != nil {
@@ -267,7 +267,7 @@ func (s *redfishService) SystemReset(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// VirtualMediaCollection handles GET /redfish/v1/Systems/{systemId}/VirtualMedia
+// VirtualMediaCollection handles GET /redfish/v1/Systems/{systemId}/VirtualMedia.
 func (s *redfishService) VirtualMediaCollection(w http.ResponseWriter, r *http.Request) {
 	dev, err := s.resolveSystem(r)
 	if err != nil {
@@ -294,7 +294,7 @@ func (s *redfishService) VirtualMediaCollection(w http.ResponseWriter, r *http.R
 	writeRedfishJSON(w, http.StatusOK, body)
 }
 
-// VirtualMedia handles GET /redfish/v1/Systems/{systemId}/VirtualMedia/{vmId}
+// VirtualMedia handles GET /redfish/v1/Systems/{systemId}/VirtualMedia/{vmId}.
 func (s *redfishService) VirtualMedia(w http.ResponseWriter, r *http.Request) {
 	dev, err := s.resolveSystem(r)
 	if err != nil {
@@ -367,7 +367,7 @@ func (s *redfishService) VirtualMedia(w http.ResponseWriter, r *http.Request) {
 	writeRedfishJSON(w, http.StatusOK, body)
 }
 
-// VirtualMediaInsert handles POST .../Actions/VirtualMedia.InsertMedia
+// VirtualMediaInsert handles POST .../Actions/VirtualMedia.InsertMedia.
 func (s *redfishService) VirtualMediaInsert(w http.ResponseWriter, r *http.Request) {
 	dev, err := s.resolveSystem(r)
 	if err != nil {
@@ -408,7 +408,7 @@ func (s *redfishService) VirtualMediaInsert(w http.ResponseWriter, r *http.Reque
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// VirtualMediaEject handles POST .../Actions/VirtualMedia.EjectMedia
+// VirtualMediaEject handles POST .../Actions/VirtualMedia.EjectMedia.
 func (s *redfishService) VirtualMediaEject(w http.ResponseWriter, r *http.Request) {
 	dev, err := s.resolveSystem(r)
 	if err != nil {
@@ -434,7 +434,7 @@ func (s *redfishService) VirtualMediaEject(w http.ResponseWriter, r *http.Reques
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// Managers handles GET /redfish/v1/Managers
+// Managers handles GET /redfish/v1/Managers.
 func (s *redfishService) Managers(w http.ResponseWriter, _ *http.Request) {
 	devices := s.dm.AllDevices()
 	members := make([]odataID, 0, len(devices))
@@ -457,7 +457,7 @@ func (s *redfishService) Managers(w http.ResponseWriter, _ *http.Request) {
 	writeRedfishJSON(w, http.StatusOK, body)
 }
 
-// Manager handles GET /redfish/v1/Managers/{managerId}
+// Manager handles GET /redfish/v1/Managers/{managerId}.
 func (s *redfishService) Manager(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("managerId")
 	dev := s.dm.FindDevice(id)

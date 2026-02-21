@@ -195,7 +195,8 @@ func TestValidateConfig(t *testing.T) {
 			if !tt.expectError && err != nil {
 				t.Errorf("unexpected error: %v", err)
 			}
-			if tt.expectError && tt.errorMsg != "" && err != nil && !contains(err.Error(), tt.errorMsg) {
+			if tt.expectError && tt.errorMsg != "" && err != nil &&
+				!contains(err.Error(), tt.errorMsg) {
 				t.Errorf("expected error containing %q, got %q", tt.errorMsg, err.Error())
 			}
 		})

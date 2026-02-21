@@ -11,10 +11,12 @@ import (
 // stubDriver is a minimal driver for testing device resolution.
 type stubProvider struct{}
 
-func (s *stubProvider) Name() string                       { return "stub" }
-func (s *stubProvider) Capabilities() []providers.Capability   { return []providers.Capability{providers.CapPowerControl} }
-func (s *stubProvider) Open(_ context.Context) error        { return nil }
-func (s *stubProvider) Close() error                        { return nil }
+func (s *stubProvider) Name() string { return "stub" }
+func (s *stubProvider) Capabilities() []providers.Capability {
+	return []providers.Capability{providers.CapPowerControl}
+}
+func (s *stubProvider) Open(_ context.Context) error { return nil }
+func (s *stubProvider) Close() error                 { return nil }
 
 func newTestDeviceManager() *providers.DeviceManager {
 	dm := providers.NewDeviceManager()
