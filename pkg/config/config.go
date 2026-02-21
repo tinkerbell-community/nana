@@ -49,8 +49,8 @@ type BootMacroStepConfig struct {
 
 // BootDeviceConfig defines the keyboard macro sequence for a boot device option.
 type BootDeviceConfig struct {
-	Device string              `mapstructure:"device" yaml:"device"`
-	Delay  string              `mapstructure:"delay"  yaml:"delay"`
+	Device string                `mapstructure:"device" yaml:"device"`
+	Delay  string                `mapstructure:"delay"  yaml:"delay"`
 	Steps  []BootMacroStepConfig `mapstructure:"steps"  yaml:"steps"`
 }
 

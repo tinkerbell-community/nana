@@ -16,6 +16,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/cookiejar"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -912,7 +913,7 @@ func (c *Client) SendWOLMagicPacket(ctx context.Context, macAddress string) erro
 // --- Keyboard Macros ---
 
 // KeyboardMacroStep defines a single step in a keyboard macro.
-// Keys and Modifiers are string names (e.g. "enter", "ctrl").
+// Keys and Modifiers are string names (e.g. "enter", "ctrl", "f12").
 // Delay is the pause in milliseconds after this step is sent.
 type KeyboardMacroStep struct {
 	Keys      []string `json:"keys"`
@@ -920,26 +921,122 @@ type KeyboardMacroStep struct {
 	Delay     int      `json:"delay"`
 }
 
-// ExecuteKeyboardMacro sends a keyboard macro to the JetKVM device for execution.
-// The device processes each step sequentially, sending key reports and waiting
-// for the specified delay between steps.
-func (c *Client) ExecuteKeyboardMacro(ctx context.Context, steps []KeyboardMacroStep) error {
-	// Convert steps to a generic representation for the JSON-RPC call.
-	stepsParam := make([]map[string]any, len(steps))
-	for i, s := range steps {
-		stepsParam[i] = map[string]any{
-			"keys":      s.Keys,
-			"modifiers": s.Modifiers,
-			"delay":     s.Delay,
+// hidKeyMap maps human-readable key names to USB HID key codes.
+var hidKeyMap = map[string]byte{
+	// Letters
+	"a": 0x04, "b": 0x05, "c": 0x06, "d": 0x07, "e": 0x08,
+	"f": 0x09, "g": 0x0A, "h": 0x0B, "i": 0x0C, "j": 0x0D,
+	"k": 0x0E, "l": 0x0F, "m": 0x10, "n": 0x11, "o": 0x12,
+	"p": 0x13, "q": 0x14, "r": 0x15, "s": 0x16, "t": 0x17,
+	"u": 0x18, "v": 0x19, "w": 0x1A, "x": 0x1B, "y": 0x1C,
+	"z": 0x1D,
+	// Numbers
+	"1": 0x1E, "2": 0x1F, "3": 0x20, "4": 0x21, "5": 0x22,
+	"6": 0x23, "7": 0x24, "8": 0x25, "9": 0x26, "0": 0x27,
+	// Common keys
+	"enter": 0x28, "return": 0x28,
+	"escape": 0x29, "esc": 0x29,
+	"backspace": 0x2A,
+	"tab":       0x2B,
+	"space":     0x2C,
+	"minus":     0x2D, "-": 0x2D,
+	"equal": 0x2E, "=": 0x2E,
+	// Function keys
+	"f1": 0x3A, "f2": 0x3B, "f3": 0x3C, "f4": 0x3D,
+	"f5": 0x3E, "f6": 0x3F, "f7": 0x40, "f8": 0x41,
+	"f9": 0x42, "f10": 0x43, "f11": 0x44, "f12": 0x45,
+	// Navigation
+	"insert": 0x49, "home": 0x4A, "pageup": 0x4B,
+	"delete": 0x4C, "end": 0x4D, "pagedown": 0x4E,
+	"right": 0x4F, "arrowright": 0x4F,
+	"left": 0x50, "arrowleft": 0x50,
+	"down": 0x51, "arrowdown": 0x51,
+	"up": 0x52, "arrowup": 0x52,
+}
+
+// hidModifierMap maps modifier name strings to their USB HID bitmask values.
+var hidModifierMap = map[string]byte{
+	"ctrl": 0x01, "control": 0x01, "lctrl": 0x01, "leftctrl": 0x01,
+	"shift": 0x02, "lshift": 0x02, "leftshift": 0x02,
+	"alt": 0x04, "lalt": 0x04, "leftalt": 0x04,
+	"meta": 0x08, "gui": 0x08, "windows": 0x08, "lgui": 0x08,
+	"rctrl": 0x10, "rightctrl": 0x10,
+	"rshift": 0x20, "rightshift": 0x20,
+	"ralt": 0x40, "rightalt": 0x40, "altgr": 0x40,
+	"rgui": 0x80, "rightgui": 0x80,
+}
+
+// hidKeyBufferSize matches the fixed key buffer size on the JetKVM device.
+const hidKeyBufferSize = 6
+
+// KeyboardReport sends a raw HID keyboard report to the device.
+// modifier is the modifier bitmask byte; keys are the HID key codes (max 6).
+// Call with modifier=0 and empty keys to release all keys.
+func (c *Client) KeyboardReport(ctx context.Context, modifier byte, keys []byte) error {
+	keysParam := make([]int, hidKeyBufferSize)
+	for i, k := range keys {
+		if i >= hidKeyBufferSize {
+			break
 		}
+		keysParam[i] = int(k)
 	}
 
-	resp, err := c.Call(ctx, "executeKeyboardMacro", map[string]any{"steps": stepsParam})
+	resp, err := c.Call(ctx, "keyboardReport", map[string]any{
+		"modifier": int(modifier),
+		"keys":     keysParam,
+	})
 	if err != nil {
 		return err
 	}
 	if resp.Error != nil {
 		return fmt.Errorf("RPC error: %v", resp.Error)
+	}
+	return nil
+}
+
+// ExecuteKeyboardMacro runs a keyboard macro client-side using keyboardReport RPC calls.
+// Each step presses the specified keys/modifiers, then immediately releases them,
+// then waits for the step's delay before proceeding to the next step.
+func (c *Client) ExecuteKeyboardMacro(ctx context.Context, steps []KeyboardMacroStep) error {
+	for _, step := range steps {
+		// Build modifier byte from modifier name strings.
+		var modifier byte
+		for _, mod := range step.Modifiers {
+			if bit, ok := hidModifierMap[strings.ToLower(mod)]; ok {
+				modifier |= bit
+			}
+		}
+
+		// Build key codes from key name strings (up to hidKeyBufferSize).
+		var keys []byte
+		for _, keyName := range step.Keys {
+			lower := strings.ToLower(keyName)
+			if code, ok := hidKeyMap[lower]; ok {
+				keys = append(keys, code)
+				if len(keys) >= hidKeyBufferSize {
+					break
+				}
+			}
+		}
+
+		// Press the keys.
+		if err := c.KeyboardReport(ctx, modifier, keys); err != nil {
+			return fmt.Errorf("keyboardReport press failed: %w", err)
+		}
+
+		// Release all keys immediately.
+		if err := c.KeyboardReport(ctx, 0, nil); err != nil {
+			return fmt.Errorf("keyboardReport release failed: %w", err)
+		}
+
+		// Wait the step delay.
+		if step.Delay > 0 {
+			select {
+			case <-time.After(time.Duration(step.Delay) * time.Millisecond):
+			case <-ctx.Done():
+				return fmt.Errorf("keyboard macro cancelled: %w", ctx.Err())
+			}
+		}
 	}
 	return nil
 }
