@@ -7,10 +7,11 @@ package jetkvm
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
-	"github.com/jetkvm/cloud-api/mgmt-api/pkg/client"
 	"github.com/jetkvm/cloud-api/mgmt-api/pkg/providers"
+	"github.com/jetkvm/cloud-api/mgmt-api/pkg/providers/jetkvm/client"
 )
 
 // Provider implements the providers.Provider interface for JetKVM devices.
@@ -19,13 +20,14 @@ type Provider struct {
 	host      string
 	password  string
 	timeout   time.Duration
+	logger    *slog.Logger
 }
 
 func init() {
 	providers.Register("jetkvm", newProvider)
 }
 
-func newProvider(cfg map[string]interface{}) (providers.Provider, error) {
+func newProvider(cfg map[string]any) (providers.Provider, error) {
 	host, _ := cfg["host"].(string)
 	if host == "" {
 		return nil, fmt.Errorf("jetkvm provider requires 'host' config")
@@ -51,6 +53,7 @@ func newProvider(cfg map[string]interface{}) (providers.Provider, error) {
 		host:      host,
 		password:  password,
 		timeout:   timeout,
+		logger:    slog.Default(),
 	}, nil
 }
 
@@ -59,7 +62,11 @@ func (p *Provider) Name() string { return "jetkvm" }
 
 // Capabilities returns the list of capabilities this provider offers.
 func (p *Provider) Capabilities() []providers.Capability {
-	return []providers.Capability{providers.CapPowerControl, providers.CapVirtualMedia, providers.CapBMCInfo}
+	return []providers.Capability{
+		providers.CapPowerControl,
+		providers.CapVirtualMedia,
+		providers.CapBMCInfo,
+	}
 }
 
 // Open initializes the WebRTC connection to the JetKVM device.

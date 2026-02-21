@@ -96,6 +96,12 @@ type StorageSpace struct {
 	FreeBytes  int64 `json:"freeBytes"`
 }
 
+// WakeOnLanDevice represents a device configured for Wake-on-LAN on the JetKVM.
+type WakeOnLanDevice struct {
+	Name       string `json:"name"`
+	MacAddress string `json:"macAddress"`
+}
+
 // Config holds the connection parameters for a JetKVM device.
 type Config struct {
 	Host     string
@@ -132,10 +138,10 @@ type Client struct {
 	wsClient   *http.Client // WebSocket upgrades (needs persistent connections)
 	logger     *slog.Logger
 
-	mu      sync.Mutex
-	pc      *webrtc.PeerConnection
-	dc      *webrtc.DataChannel
-	closed  bool
+	mu     sync.Mutex
+	pc     *webrtc.PeerConnection
+	dc     *webrtc.DataChannel
+	closed bool
 
 	nextID    atomic.Int64
 	pending   map[int64]chan *JSONRPCResponse
@@ -293,7 +299,11 @@ func (c *Client) Connect(ctx context.Context) error {
 	})
 
 	dc.OnError(func(err error) {
-		c.logger.Error("data channel error", slog.String("host", c.config.Host), slog.String("error", err.Error()))
+		c.logger.Error(
+			"data channel error",
+			slog.String("host", c.config.Host),
+			slog.String("error", err.Error()),
+		)
 	})
 
 	peerConnection.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
@@ -486,7 +496,11 @@ func (c *Client) Close() error {
 }
 
 // Call sends a JSON-RPC request over the WebRTC data channel and waits for the response.
-func (c *Client) Call(ctx context.Context, method string, params map[string]any) (*JSONRPCResponse, error) {
+func (c *Client) Call(
+	ctx context.Context,
+	method string,
+	params map[string]any,
+) (*JSONRPCResponse, error) {
 	c.mu.Lock()
 	dc := c.dc
 	c.mu.Unlock()
@@ -626,31 +640,94 @@ func (c *Client) SetATXPowerAction(ctx context.Context, action ATXAction) error 
 	return nil
 }
 
-// GetPowerState returns a unified power state by checking ATX and DC power.
+// GetActiveExtension returns the currently active extension on the JetKVM device.
+// Possible values: "atx-power", "dc-power", or "" (no extension).
+func (c *Client) GetActiveExtension(ctx context.Context) (string, error) {
+	resp, err := c.Call(ctx, "getActiveExtension", nil)
+	if err != nil {
+		return "", err
+	}
+	if resp.Error != nil {
+		return "", fmt.Errorf("RPC error: %v", resp.Error)
+	}
+
+	ext, _ := resp.Result.(string)
+	return ext, nil
+}
+
+// GetWakeOnLanDevices returns the list of devices configured for Wake-on-LAN.
+func (c *Client) GetWakeOnLanDevices(ctx context.Context) ([]WakeOnLanDevice, error) {
+	resp, err := c.Call(ctx, "getWakeOnLanDevices", nil)
+	if err != nil {
+		return nil, err
+	}
+	if resp.Error != nil {
+		return nil, fmt.Errorf("RPC error: %v", resp.Error)
+	}
+
+	data, err := json.Marshal(resp.Result)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal result: %w", err)
+	}
+
+	var devices []WakeOnLanDevice
+	if err := json.Unmarshal(data, &devices); err != nil {
+		return nil, fmt.Errorf("failed to parse WOL devices: %w", err)
+	}
+	return devices, nil
+}
+
+// GetPowerState returns the power state based on the active extension.
 func (c *Client) GetPowerState(ctx context.Context) (PowerState, error) {
-	// Try ATX state first (most common with the ATX extension board).
-	atxState, err := c.GetATXState(ctx)
-	if err == nil && atxState != nil {
+	ext, err := c.GetActiveExtension(ctx)
+	if err != nil {
+		return PowerUnknown, fmt.Errorf("failed to get active extension: %w", err)
+	}
+
+	switch ext {
+	case "atx-power":
+		atxState, err := c.GetATXState(ctx)
+		if err != nil {
+			return PowerUnknown, fmt.Errorf("failed to get ATX state: %w", err)
+		}
 		if atxState.PowerLED {
 			return PowerOn, nil
 		}
 		return PowerOff, nil
-	}
 
-	// Fall back to DC power state.
-	dcState, err := c.GetDCPowerState(ctx)
-	if err != nil {
-		return PowerUnknown, fmt.Errorf("failed to get power state: %w", err)
-	}
+	case "dc-power":
+		dcState, err := c.GetDCPowerState(ctx)
+		if err != nil {
+			return PowerUnknown, fmt.Errorf("failed to get DC power state: %w", err)
+		}
+		if dcState {
+			return PowerOn, nil
+		}
+		return PowerOff, nil
 
-	if dcState {
-		return PowerOn, nil
+	default:
+		return PowerUnknown, fmt.Errorf("no supported power extension active: %q", ext)
 	}
-	return PowerOff, nil
 }
 
-// SetPowerState sets the power state using ATX actions.
+// SetPowerState sets the power state based on the active extension.
 func (c *Client) SetPowerState(ctx context.Context, state string) error {
+	ext, err := c.GetActiveExtension(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get active extension: %w", err)
+	}
+
+	switch ext {
+	case "atx-power":
+		return c.setATXPowerState(ctx, state)
+	case "dc-power":
+		return c.setDCPowerState(ctx, state)
+	default:
+		return fmt.Errorf("no supported power extension active: %q", ext)
+	}
+}
+
+func (c *Client) setATXPowerState(ctx context.Context, state string) error {
 	switch state {
 	case "on":
 		return c.SetATXPowerAction(ctx, ATXPowerOn)
@@ -662,6 +739,17 @@ func (c *Client) SetPowerState(ctx context.Context, state string) error {
 		return c.SetATXPowerAction(ctx, ATXReset)
 	default:
 		return fmt.Errorf("invalid power state: %s", state)
+	}
+}
+
+func (c *Client) setDCPowerState(ctx context.Context, state string) error {
+	switch state {
+	case "on":
+		return c.SetDCPowerState(ctx, true)
+	case "off":
+		return c.SetDCPowerState(ctx, false)
+	default:
+		return fmt.Errorf("DC power only supports on/off, got: %s", state)
 	}
 }
 
