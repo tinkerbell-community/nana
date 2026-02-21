@@ -4,24 +4,21 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/sha256"
-	"crypto/tls"
 	"encoding/pem"
 	"fmt"
-	"net/http"
 	"strings"
 
-	"github.com/hashicorp/go-retryablehttp"
 	"github.com/ubiquiti-community/go-unifi/unifi"
 	"github.com/ubiquiti-community/go-unifi/unifi/settings"
 	"golang.org/x/crypto/ssh"
 )
 
 // GenerateKeyFromAPI takes the UniFi API key and returns the SSH private and public keys.
-func GenerateKeyFromAPI(unifiAPIKey string) ([]byte, []byte, error) {
+func GenerateKeyFromAPI(apiKey string) ([]byte, []byte, error) {
 	// 1. Add a static salt for domain separation.
 	// This ensures the hash is completely unique to this specific SSH use-case.
 	salt := "unifi-swctrl-ssh-seed-v1"
-	seedMaterial := unifiAPIKey + salt
+	seedMaterial := apiKey + salt
 
 	// 2. Hash the combined string to create the strict 32-byte seed
 	hash := sha256.Sum256([]byte(seedMaterial))
@@ -53,26 +50,12 @@ func ensureSSHKey(
 	baseURL, apiKey, site string,
 	publicAuthorizedKey []byte,
 ) error {
-	client := &unifi.ApiClient{}
-	client.SetAPIKey(apiKey)
-
-	if err := client.SetBaseURL(baseURL); err != nil {
-		return fmt.Errorf("failed to set UniFi base URL: %w", err)
-	}
-
-	httpClient := retryablehttp.NewClient()
-	httpClient.HTTPClient.Transport = &http.Transport{
-		TLSClientConfig: &tls.Config{
-			MinVersion: tls.VersionTLS12,
-		},
-	}
-	httpClient.Logger = nil
-	if err := client.SetHTTPClient(httpClient); err != nil {
-		return fmt.Errorf("failed to set HTTP client: %w", err)
-	}
-
-	if err := client.Login(ctx, "", ""); err != nil {
-		return fmt.Errorf("failed to login to UniFi API: %w", err)
+	client, err := unifi.New(ctx, &unifi.Config{
+		BaseURL: baseURL,
+		APIKey:  apiKey,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create UniFi client: %w", err)
 	}
 
 	_, mgmt, err := unifi.GetSetting[*settings.Mgmt](client, ctx, site)

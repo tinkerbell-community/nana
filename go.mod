@@ -4,18 +4,20 @@ go 1.24.9
 
 require (
 	github.com/coder/websocket v1.8.12
-	github.com/hashicorp/go-retryablehttp v0.7.8
 	github.com/pion/webrtc/v4 v4.0.10
 	github.com/spf13/cobra v1.10.1
 	github.com/spf13/viper v1.19.0
-	github.com/ubiquiti-community/go-unifi v1.33.30
+	github.com/ubiquiti-community/go-unifi v1.33.31
 	golang.org/x/crypto v0.47.0
 )
+
+replace github.com/ubiquiti-community/go-unifi => ../../ubiquiti-community/go-unifi
 
 require (
 	github.com/fsnotify/fsnotify v1.7.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
+	github.com/hashicorp/go-retryablehttp v0.7.8 // indirect
 	github.com/hashicorp/hcl v1.0.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/magiconair/properties v1.8.10 // indirect
