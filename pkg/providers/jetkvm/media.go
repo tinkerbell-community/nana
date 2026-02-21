@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/jetkvm/cloud-api/mgmt-api/pkg/providers"
+	"github.com/tinkerbell-community/nana/pkg/providers"
 )
 
 // MountMedia mounts an image from a URL. Kind is "cdrom" or "floppy".

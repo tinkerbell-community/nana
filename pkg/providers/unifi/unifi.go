@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jetkvm/cloud-api/mgmt-api/pkg/providers"
+	"github.com/tinkerbell-community/nana/pkg/providers"
 	"github.com/ubiquiti-community/go-unifi/unifi"
 	"golang.org/x/crypto/ssh"
 )

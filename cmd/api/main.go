@@ -10,12 +10,12 @@ import (
 	"time"
 
 	"github.com/KimMachineGun/automemlimit/memlimit"
-	"github.com/jetkvm/cloud-api/mgmt-api/pkg/api"
-	"github.com/jetkvm/cloud-api/mgmt-api/pkg/config"
-	"github.com/jetkvm/cloud-api/mgmt-api/pkg/providers"
-	_ "github.com/jetkvm/cloud-api/mgmt-api/pkg/providers/jetkvm" // register jetkvm provider
-	_ "github.com/jetkvm/cloud-api/mgmt-api/pkg/providers/unifi"  // register unifi provider
 	"github.com/spf13/cobra"
+	"github.com/tinkerbell-community/nana/pkg/api"
+	"github.com/tinkerbell-community/nana/pkg/config"
+	"github.com/tinkerbell-community/nana/pkg/providers"
+	_ "github.com/tinkerbell-community/nana/pkg/providers/jetkvm" // register jetkvm provider
+	_ "github.com/tinkerbell-community/nana/pkg/providers/unifi"  // register unifi provider
 	"go.uber.org/automaxprocs/maxprocs"
 )
 

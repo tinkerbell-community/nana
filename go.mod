@@ -1,4 +1,4 @@
-module github.com/jetkvm/cloud-api/mgmt-api
+module github.com/tinkerbell-community/nana
 
 go 1.24.9
 

@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/jetkvm/cloud-api/mgmt-api/pkg/providers"
+	"github.com/tinkerbell-community/nana/pkg/providers"
 )
 
 func newTestRedfishService() (RedfishService, *mockTestDriver) {

@@ -1,6 +1,6 @@
 # JetKVM Management API
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/jetkvm/cloud-api/mgmt-api.svg)](https://pkg.go.dev/github.com/jetkvm/cloud-api/mgmt-api)
+[![Go Reference](https://pkg.go.dev/badge/github.com/tinkerbell-community/nana.svg)](https://pkg.go.dev/github.com/tinkerbell-community/nana)
 [![go.mod](https://img.shields.io/github/go-mod/go-version/jetkvm/cloud-api)](go.mod)
 
 A BMC-compatible management API server for local [JetKVM](https://github.com/jetkvm/kvm) devices, providing power management, virtual media control, and device administration via JSON-RPC over HTTP.
