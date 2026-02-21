@@ -269,6 +269,7 @@ func (c *Client) Connect(ctx context.Context) error {
 		c.mu.Unlock()
 		return nil // already connected
 	}
+	c.closed = false
 
 	// Authenticate first.
 	if err := c.Login(ctx); err != nil {
@@ -515,7 +516,14 @@ func (c *Client) Close() error {
 	return nil
 }
 
+// Reconnect forces a close and re-establishes the WebRTC connection.
+func (c *Client) Reconnect(ctx context.Context) error {
+	_ = c.Close()
+	return c.Connect(ctx)
+}
+
 // Call sends a JSON-RPC request over the WebRTC data channel and waits for the response.
+// If the data channel is closed, it attempts to reconnect before failing.
 func (c *Client) Call(
 	ctx context.Context,
 	method string,
@@ -526,7 +534,16 @@ func (c *Client) Call(
 	c.mu.Unlock()
 
 	if dc == nil {
-		return nil, fmt.Errorf("not connected: data channel is nil")
+		c.logger.Info("data channel nil, attempting reconnect", slog.String("host", c.config.Host))
+		if err := c.Reconnect(ctx); err != nil {
+			return nil, fmt.Errorf("reconnect failed: %w", err)
+		}
+		c.mu.Lock()
+		dc = c.dc
+		c.mu.Unlock()
+		if dc == nil {
+			return nil, fmt.Errorf("not connected: data channel is nil after reconnect")
+		}
 	}
 
 	id := c.nextID.Add(1)
