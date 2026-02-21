@@ -20,7 +20,7 @@ type Provider struct {
 	host     string
 	password string
 	timeout  time.Duration
-	logger   *slog.Logger
+	logger   slog.Logger
 }
 
 func init() {
@@ -48,12 +48,14 @@ func newProvider(cfg map[string]any) (providers.Provider, error) {
 		return nil, fmt.Errorf("failed to create JetKVM client: %w", err)
 	}
 
+	logger := slog.Default().With("provider", "jetkvm", "host", host)
+
 	return &Provider{
 		c:        c,
 		host:     host,
 		password: password,
 		timeout:  timeout,
-		logger:   slog.Default(),
+		logger:   *logger,
 	}, nil
 }
 
