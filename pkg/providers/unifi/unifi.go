@@ -187,8 +187,6 @@ func (p *Provider) executeCommand(ctx context.Context, command string) (string, 
 	return string(output), nil
 }
 
-// --- Output parsers (derived from github.com/ubiquiti-community/unifi-rpc) ---
-
 type poePortStatus struct {
 	port   int
 	poePwr string

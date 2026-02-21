@@ -1,4 +1,4 @@
-// Package provider defines the capability-based provider interfaces for BMC management.
+// Package providers defines the capability-based provider interfaces for BMC management.
 //
 // Each provider implements a subset of capabilities (power control, virtual media,
 // boot device, BMC info). Multiple providers can be composed for a single device,
@@ -11,7 +11,10 @@ package providers
 
 import (
 	"context"
+	"fmt"
+	"net/http"
 	"slices"
+	"strings"
 )
 
 // Capability represents a BMC management capability that a provider can offer.
@@ -86,4 +89,33 @@ type BMCInfoProvider interface {
 // HasCapability checks if a provider offers a specific capability.
 func HasCapability(p Provider, c Capability) bool {
 	return slices.Contains(p.Capabilities(), c)
+}
+
+// ResolveDevice identifies the target managed device from an HTTP request.
+//
+// The device is identified by (in priority order):
+//  1. X-Device header value (matched by name or MAC)
+//  2. "host" field in the RPC request body (caller should pass it explicitly)
+//
+// Returns an error if no device can be resolved.
+func ResolveDevice(r *http.Request, dm *DeviceManager) (*ManagedDevice, error) {
+	id := strings.TrimSpace(r.Header.Get("X-Device"))
+	if id == "" {
+		return nil, fmt.Errorf("X-Device header is required to identify target device")
+	}
+
+	device := dm.FindDevice(id)
+	if device == nil {
+		return nil, fmt.Errorf("device not found: %s", id)
+	}
+	return device, nil
+}
+
+// ResolveDeviceByID looks up a device by name or MAC address.
+func ResolveDeviceByID(id string, dm *DeviceManager) (*ManagedDevice, error) {
+	device := dm.FindDevice(id)
+	if device == nil {
+		return nil, fmt.Errorf("device not found: %s", id)
+	}
+	return device, nil
 }

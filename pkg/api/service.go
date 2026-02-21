@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/jetkvm/cloud-api/mgmt-api/pkg/models"
 	"github.com/jetkvm/cloud-api/mgmt-api/pkg/providers"
 )
 
@@ -35,7 +34,7 @@ func writeError(w http.ResponseWriter, statusCode int, message string) {
 
 func (s *rpcService) getDevice(r *http.Request) (*providers.ManagedDevice, error) {
 	// First try X-Device header.
-	dev, err := models.ResolveDevice(r, s.dm)
+	dev, err := providers.ResolveDevice(r, s.dm)
 	if err != nil {
 		return nil, err
 	}
@@ -46,7 +45,7 @@ func (s *rpcService) getDeviceByHost(host string) (*providers.ManagedDevice, err
 	if host == "" {
 		return nil, fmt.Errorf("device identifier is required")
 	}
-	return models.ResolveDeviceByID(host, s.dm)
+	return providers.ResolveDeviceByID(host, s.dm)
 }
 
 func (s *rpcService) getPowerState(

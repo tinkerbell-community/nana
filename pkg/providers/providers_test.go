@@ -2,6 +2,7 @@ package providers
 
 import (
 	"context"
+	"net/http"
 	"testing"
 )
 
@@ -334,5 +335,112 @@ func TestProviderConfig_ToMap_Empty(t *testing.T) {
 	}
 	if _, ok := m["password"]; ok {
 		t.Error("expected no 'password' key for empty password")
+	}
+}
+
+// stubDriver is a minimal driver for testing device resolution.
+type stubProvider struct{}
+
+func (s *stubProvider) Name() string { return "stub" }
+func (s *stubProvider) Capabilities() []Capability {
+	return []Capability{CapPowerControl}
+}
+func (s *stubProvider) Open(_ context.Context) error { return nil }
+func (s *stubProvider) Close() error                 { return nil }
+
+func newTestDeviceManager() *DeviceManager {
+	dm := NewDeviceManager()
+	dm.AddDevice(&ManagedDevice{
+		Name:      "server-01",
+		MAC:       "AA:BB:CC:DD:EE:FF",
+		Providers: []Provider{&stubProvider{}},
+	})
+	dm.AddDevice(&ManagedDevice{
+		MAC:       "11:22:33:44:55:66",
+		Providers: []Provider{&stubProvider{}},
+	})
+	return dm
+}
+
+func TestResolveDevice(t *testing.T) {
+	dm := newTestDeviceManager()
+
+	tests := []struct {
+		name        string
+		header      string
+		expectedID  string
+		expectError bool
+	}{
+		{
+			name:       "resolve by name",
+			header:     "server-01",
+			expectedID: "server-01",
+		},
+		{
+			name:       "resolve by MAC",
+			header:     "AA:BB:CC:DD:EE:FF",
+			expectedID: "server-01",
+		},
+		{
+			name:       "resolve by MAC (different format)",
+			header:     "aa-bb-cc-dd-ee-ff",
+			expectedID: "server-01",
+		},
+		{
+			name:       "resolve device without name by MAC",
+			header:     "11:22:33:44:55:66",
+			expectedID: "11:22:33:44:55:66",
+		},
+		{
+			name:        "missing header",
+			header:      "",
+			expectError: true,
+		},
+		{
+			name:        "device not found",
+			header:      "nonexistent",
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req, _ := http.NewRequest("POST", "/", nil)
+			if tt.header != "" {
+				req.Header.Set("X-Device", tt.header)
+			}
+
+			dev, err := ResolveDevice(req, dm)
+			if tt.expectError {
+				if err == nil {
+					t.Error("expected error but got none")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if dev.ID() != tt.expectedID {
+				t.Errorf("expected ID %q, got %q", tt.expectedID, dev.ID())
+			}
+		})
+	}
+}
+
+func TestResolveDeviceByID(t *testing.T) {
+	dm := newTestDeviceManager()
+
+	dev, err := ResolveDeviceByID("server-01", dm)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if dev.ID() != "server-01" {
+		t.Errorf("expected ID 'server-01', got %q", dev.ID())
+	}
+
+	_, err = ResolveDeviceByID("nonexistent", dm)
+	if err == nil {
+		t.Error("expected error for nonexistent device")
 	}
 }
