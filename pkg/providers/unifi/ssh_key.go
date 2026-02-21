@@ -13,8 +13,8 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-// GenerateKeyFromAPI takes the UniFi API key and returns the SSH private and public keys.
-func GenerateKeyFromAPI(apiKey string) ([]byte, []byte, error) {
+// generateKeyFromAPI takes the UniFi API key and returns the SSH private and public keys.
+func generateKeyFromAPI(apiKey string) ([]byte, []byte, error) {
 	// 1. Add a static salt for domain separation.
 	// This ensures the hash is completely unique to this specific SSH use-case.
 	salt := "unifi-swctrl-ssh-seed-v1"
@@ -47,17 +47,10 @@ func GenerateKeyFromAPI(apiKey string) ([]byte, []byte, error) {
 // present in the device's mgmt settings.
 func ensureSSHKey(
 	ctx context.Context,
-	baseURL, apiKey, site string,
+	client *unifi.ApiClient,
+	site string,
 	publicAuthorizedKey []byte,
 ) error {
-	client, err := unifi.New(ctx, &unifi.Config{
-		BaseURL: baseURL,
-		APIKey:  apiKey,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to create UniFi client: %w", err)
-	}
-
 	_, mgmt, err := unifi.GetSetting[*settings.Mgmt](client, ctx, site)
 	if err != nil {
 		return fmt.Errorf("failed to get mgmt settings: %w", err)

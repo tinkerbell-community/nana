@@ -8,12 +8,9 @@ import (
 
 // GetPowerState returns the current PoE power state of the device's switch port.
 func (p *Provider) GetPowerState(ctx context.Context) (string, error) {
-	portID, err := p.resolvePort(ctx)
-	if err != nil {
-		return "", err
-	}
-
-	output, err := p.executeCommand(ctx, fmt.Sprintf("swctrl poe show id %d", portID))
+	output, portID, err := p.executeOnSwitch(ctx, func(port int) string {
+		return fmt.Sprintf("swctrl poe show id %d", port)
+	})
 	if err != nil {
 		return "", fmt.Errorf("failed to get PoE status: %w", err)
 	}
@@ -41,24 +38,21 @@ func (p *Provider) GetPowerState(ctx context.Context) (string, error) {
 
 // SetPowerState sets the PoE power state. Valid values: "on", "off", "cycle", "reset".
 func (p *Provider) SetPowerState(ctx context.Context, state string) error {
-	portID, err := p.resolvePort(ctx)
-	if err != nil {
-		return err
-	}
-
-	var command string
+	var cmdFmt string
 	switch state {
 	case "on":
-		command = fmt.Sprintf("swctrl poe set auto id %d", portID)
+		cmdFmt = "swctrl poe set auto id %d"
 	case "off":
-		command = fmt.Sprintf("swctrl poe set off id %d", portID)
+		cmdFmt = "swctrl poe set off id %d"
 	case "cycle", "reset":
-		command = fmt.Sprintf("swctrl poe restart id %d", portID)
+		cmdFmt = "swctrl poe restart id %d"
 	default:
 		return fmt.Errorf("unsupported power state: %s", state)
 	}
 
-	_, err = p.executeCommand(ctx, command)
+	_, _, err := p.executeOnSwitch(ctx, func(port int) string {
+		return fmt.Sprintf(cmdFmt, port)
+	})
 	if err != nil {
 		return fmt.Errorf("failed to set power state: %w", err)
 	}

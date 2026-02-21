@@ -1,8 +1,8 @@
 // Package unifi implements a BMC provider for devices powered via UniFi switch PoE.
 //
-// The UniFi provider connects to a UniFi switch over SSH and controls PoE power
-// on the port associated with a device's MAC address. The port is auto-discovered
-// from the switch's MAC address table and cached for subsequent operations.
+// The UniFi provider uses the UniFi controller API to discover which switch and
+// port a device is connected to, then controls PoE power over SSH. The upstream
+// switch IP and port are cached and re-discovered on SSH errors.
 package unifi
 
 import (
@@ -17,20 +17,56 @@ import (
 	"time"
 
 	"github.com/jetkvm/cloud-api/mgmt-api/pkg/providers"
+	"github.com/ubiquiti-community/go-unifi/unifi"
 	"golang.org/x/crypto/ssh"
 )
+
+// API client registry: one shared client per controller URL.
+var (
+	clientsMu sync.Mutex
+	clients   = make(map[string]*unifi.ApiClient)
+)
+
+func getOrCreateClient(ctx context.Context, apiURL, apiKey string) (*unifi.ApiClient, error) {
+	clientsMu.Lock()
+	defer clientsMu.Unlock()
+
+	if c, ok := clients[apiURL]; ok {
+		return c, nil
+	}
+
+	c, err := unifi.New(ctx, &unifi.Config{
+		BaseURL: apiURL,
+		APIKey:  apiKey,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	clients[apiURL] = c
+	return c, nil
+}
+
+// uplinkInfo holds cached information about the upstream switch for a device.
+type uplinkInfo struct {
+	switchIP string
+	port     int
+}
 
 // Provider implements the providers.Provider and providers.PowerController
 // interfaces for devices powered via UniFi switch PoE ports.
 type Provider struct {
-	sshConfig  *ssh.ClientConfig
-	host       string
-	sshPort    int
-	mac        string // device MAC for port auto-discovery
-	apiKey     string // UniFi API key for SSH key provisioning
-	site       string // UniFi site name (default: "default")
-	mu         sync.Mutex
-	cachedPort int // 0 = not yet resolved
+	apiURL       string
+	apiKey       string
+	site         string
+	mac          string
+	sshConfig    *ssh.ClientConfig
+	sshPort      int
+	provisionSSH bool // whether to provision SSH key via API
+
+	mu     sync.Mutex
+	client *unifi.ApiClient
+	uplink *uplinkInfo
 }
 
 func init() {
@@ -38,9 +74,19 @@ func init() {
 }
 
 func newProvider(cfg map[string]any) (providers.Provider, error) {
-	host, _ := cfg["host"].(string)
-	if host == "" {
-		return nil, fmt.Errorf("unifi provider requires 'host' config")
+	apiURL, _ := cfg["api_url"].(string)
+	if apiURL == "" {
+		return nil, fmt.Errorf("unifi provider requires 'api_url' config")
+	}
+
+	apiKey, _ := cfg["api_key"].(string)
+	if apiKey == "" {
+		return nil, fmt.Errorf("unifi provider requires 'api_key' config")
+	}
+
+	mac, _ := cfg["mac"].(string)
+	if mac == "" {
+		return nil, fmt.Errorf("unifi provider requires 'mac' config")
 	}
 
 	username, _ := cfg["ssh_username"].(string)
@@ -57,30 +103,17 @@ func newProvider(cfg map[string]any) (providers.Provider, error) {
 		sshPort = int(p)
 	}
 
-	mac, _ := cfg["mac"].(string)
-
 	site, _ := cfg["site"].(string)
 	if site == "" {
 		site = "default"
 	}
 
-	apiKey, _ := cfg["api_key"].(string)
 	sshKeyPath, _ := cfg["ssh_key_path"].(string)
 
 	var signer ssh.Signer
+	provisionSSH := false
 
 	switch {
-	case apiKey != "":
-		// Generate SSH key from API key.
-		privatePEM, _, err := GenerateKeyFromAPI(apiKey)
-		if err != nil {
-			return nil, fmt.Errorf("failed to generate SSH key from API key: %w", err)
-		}
-		signer, err = ssh.ParsePrivateKey(privatePEM)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse generated SSH private key: %w", err)
-		}
-
 	case sshKeyPath != "":
 		// Expand ~ in path.
 		if strings.HasPrefix(sshKeyPath, "~/") {
@@ -101,7 +134,16 @@ func newProvider(cfg map[string]any) (providers.Provider, error) {
 		}
 
 	default:
-		return nil, fmt.Errorf("unifi provider requires 'api_key' or 'ssh_key_path' config")
+		// Generate SSH key from API key.
+		privatePEM, _, err := generateKeyFromAPI(apiKey)
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate SSH key from API key: %w", err)
+		}
+		signer, err = ssh.ParsePrivateKey(privatePEM)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse generated SSH private key: %w", err)
+		}
+		provisionSSH = true
 	}
 
 	sshConfig := &ssh.ClientConfig{
@@ -114,12 +156,13 @@ func newProvider(cfg map[string]any) (providers.Provider, error) {
 	}
 
 	return &Provider{
-		sshConfig: sshConfig,
-		host:      host,
-		sshPort:   sshPort,
-		mac:       mac,
-		apiKey:    apiKey,
-		site:      site,
+		apiURL:       apiURL,
+		apiKey:       apiKey,
+		site:         site,
+		mac:          mac,
+		sshConfig:    sshConfig,
+		sshPort:      sshPort,
+		provisionSSH: provisionSSH,
 	}, nil
 }
 
@@ -131,75 +174,111 @@ func (p *Provider) Capabilities() []providers.Capability {
 	return []providers.Capability{providers.CapPowerControl}
 }
 
-// Open ensures the SSH key is provisioned on the UniFi device when using API key auth.
+// Open initializes the shared UniFi API client and provisions the SSH key if needed.
 func (p *Provider) Open(ctx context.Context) error {
-	if p.apiKey == "" {
-		return nil
-	}
-
-	_, publicAuthorizedKey, err := GenerateKeyFromAPI(p.apiKey)
+	client, err := getOrCreateClient(ctx, p.apiURL, p.apiKey)
 	if err != nil {
-		return fmt.Errorf("failed to generate SSH public key: %w", err)
+		return fmt.Errorf("failed to create UniFi API client: %w", err)
 	}
+	p.client = client
 
-	baseURL := fmt.Sprintf("https://%s", p.host)
-	if err := ensureSSHKey(ctx, baseURL, p.apiKey, p.site, publicAuthorizedKey); err != nil {
-		return fmt.Errorf("failed to ensure SSH key on UniFi device: %w", err)
+	if p.provisionSSH {
+		_, publicAuthorizedKey, err := generateKeyFromAPI(p.apiKey)
+		if err != nil {
+			return fmt.Errorf("failed to generate SSH public key: %w", err)
+		}
+
+		if err := ensureSSHKey(ctx, p.client, p.site, publicAuthorizedKey); err != nil {
+			return fmt.Errorf("failed to ensure SSH key on UniFi device: %w", err)
+		}
 	}
 
 	return nil
 }
 
-// Close is a no-op; SSH connections are made per-command.
-func (p *Provider) Close() error { return nil }
-
-// --- SSH helpers ---
-
-// resolvePort determines the switch port for this device's MAC address.
-// The result is cached after the first successful lookup.
-func (p *Provider) resolvePort(ctx context.Context) (int, error) {
+// Close clears cached state.
+func (p *Provider) Close() error {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	if p.cachedPort > 0 {
-		return p.cachedPort, nil
-	}
-
-	if p.mac == "" {
-		return 0, fmt.Errorf("unifi provider: no MAC address configured for port discovery")
-	}
-
-	output, err := p.executeCommand(ctx, "swctrl mac show")
-	if err != nil {
-		return 0, fmt.Errorf("failed to get MAC table: %w", err)
-	}
-
-	ml, err := parseMacList(output)
-	if err != nil {
-		return 0, fmt.Errorf("failed to parse MAC table: %w", err)
-	}
-
-	// Try normalized comparison.
-	normalizedSearch := providers.NormalizeMAC(p.mac)
-	for _, entry := range ml.entries {
-		if providers.NormalizeMAC(entry.macAddress) == normalizedSearch {
-			p.cachedPort = entry.port
-			return p.cachedPort, nil
-		}
-	}
-
-	return 0, fmt.Errorf("MAC address %s not found in switch MAC table", p.mac)
+	p.uplink = nil
+	p.mu.Unlock()
+	return nil
 }
 
-// executeCommand executes a command on the UniFi switch via SSH.
-func (p *Provider) executeCommand(ctx context.Context, command string) (string, error) {
-	addr := net.JoinHostPort(p.host, strconv.Itoa(p.sshPort))
+// --- Uplink discovery ---
 
-	conn, err := ssh.Dial("tcp", addr, p.sshConfig)
+// resolveUplink discovers or returns the cached upstream switch IP and port.
+func (p *Provider) resolveUplink(ctx context.Context) (*uplinkInfo, error) {
+	p.mu.Lock()
+	if p.uplink != nil {
+		info := *p.uplink
+		p.mu.Unlock()
+		return &info, nil
+	}
+	p.mu.Unlock()
+
+	clientInfo, err := p.client.GetClientInfo(ctx, p.site, p.mac)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get client info for MAC %s: %w", p.mac, err)
+	}
+
+	// Coalesce uplink MAC: prefer current, fall back to last known.
+	uplinkMAC := clientInfo.UplinkMac
+	if uplinkMAC == "" {
+		uplinkMAC = clientInfo.LastUplinkMac
+	}
+	if uplinkMAC == "" {
+		return nil, fmt.Errorf("no uplink MAC found for device %s", p.mac)
+	}
+
+	// Coalesce switch port: prefer current, fall back to last known.
+	var switchPort int
+	if clientInfo.SwPort != nil {
+		switchPort = int(*clientInfo.SwPort)
+	} else if clientInfo.LastUplinkRemotePort != nil {
+		switchPort = int(*clientInfo.LastUplinkRemotePort)
+	}
+	if switchPort == 0 {
+		return nil, fmt.Errorf("no switch port found for device %s", p.mac)
+	}
+
+	device, err := p.client.GetDeviceByMAC(ctx, p.site, uplinkMAC)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get uplink device %s: %w", uplinkMAC, err)
+	}
+
+	if device.ConfigNetwork == nil || device.ConfigNetwork.IP == "" {
+		return nil, fmt.Errorf("no IP configured for uplink device %s", uplinkMAC)
+	}
+
+	info := &uplinkInfo{
+		switchIP: device.ConfigNetwork.IP,
+		port:     switchPort,
+	}
+
+	p.mu.Lock()
+	p.uplink = info
+	p.mu.Unlock()
+
+	return info, nil
+}
+
+// invalidateUplink clears the cached uplink information.
+func (p *Provider) invalidateUplink() {
+	p.mu.Lock()
+	p.uplink = nil
+	p.mu.Unlock()
+}
+
+// --- SSH execution ---
+
+// sshExec runs a command on the given host via SSH using the connection pool.
+func (p *Provider) sshExec(ctx context.Context, host, command string) (string, error) {
+	addr := net.JoinHostPort(host, strconv.Itoa(p.sshPort))
+
+	conn, err := connPool.get(addr, p.sshConfig)
 	if err != nil {
 		return "", fmt.Errorf("failed to connect to SSH server %s: %w", addr, err)
 	}
-	defer conn.Close()
 
 	session, err := conn.NewSession()
 	if err != nil {
@@ -226,6 +305,38 @@ func (p *Provider) executeCommand(ctx context.Context, command string) (string, 
 	}
 
 	return string(output), nil
+}
+
+// executeOnSwitch resolves the uplink, executes a command on the upstream switch,
+// and retries once on SSH failure after invalidating the cache.
+func (p *Provider) executeOnSwitch(ctx context.Context, buildCmd func(port int) string) (string, int, error) {
+	uplink, err := p.resolveUplink(ctx)
+	if err != nil {
+		return "", 0, err
+	}
+
+	command := buildCmd(uplink.port)
+	output, err := p.sshExec(ctx, uplink.switchIP, command)
+	if err != nil {
+		// Remove stale SSH connection and invalidate uplink cache.
+		addr := net.JoinHostPort(uplink.switchIP, strconv.Itoa(p.sshPort))
+		connPool.remove(addr)
+		p.invalidateUplink()
+
+		// Re-discover and retry once.
+		uplink, err = p.resolveUplink(ctx)
+		if err != nil {
+			return "", 0, err
+		}
+
+		command = buildCmd(uplink.port)
+		output, err = p.sshExec(ctx, uplink.switchIP, command)
+		if err != nil {
+			return "", 0, err
+		}
+	}
+
+	return output, uplink.port, nil
 }
 
 type poePortStatus struct {
