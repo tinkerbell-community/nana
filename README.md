@@ -78,7 +78,7 @@ The server translates BMC RPC calls into JetKVM JSON-RPC commands sent over WebR
 ## Installation
 
 ```bash
-go build -o jetkvm-api ./cmd/api
+go build -o jetkvm-api ./cmd/nana
 ```
 
 ## Configuration
@@ -310,7 +310,7 @@ go test ./...
 ### Building
 
 ```bash
-go build -o jetkvm-api ./cmd/api
+go build -o jetkvm-api ./cmd/nana
 ```
 
 ### Cross-Compiling

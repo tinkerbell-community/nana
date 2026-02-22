@@ -6,7 +6,7 @@ RUN go mod download
 COPY ./ ./
 ARG TARGETARCH
 ARG TARGETOS
-RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -a -o jetkvm-api cmd/api/main.go
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -a -o jetkvm-api cmd/nana/main.go
 
 FROM scratch
 COPY --from=builder /workspace/jetkvm-api /
