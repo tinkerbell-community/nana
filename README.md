@@ -449,7 +449,7 @@ classDiagram
 
 ### Directory Structure
 
-```
+```text
 nana/
 ├── cmd/nana/              # CLI entrypoint (Cobra command, HTTP server setup)
 │   ├── main.go            # Server bootstrap, provider registration, route binding

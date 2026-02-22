@@ -7,8 +7,11 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
 	"strings"
+	"sync"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
@@ -84,8 +87,57 @@ type ProviderConfig struct {
 	Boot []BootDeviceConfig `mapstructure:"boot" yaml:"boot"`
 }
 
+// ToMap converts the ProviderConfig into a map[string]any suitable for the
+// providers.Factory interface.
+func (p *ProviderConfig) ToMap() map[string]any {
+	m := map[string]any{
+		"type": p.Type,
+	}
+	if p.Host != "" {
+		m["host"] = p.Host
+	}
+	if p.Password != "" {
+		m["password"] = p.Password
+	}
+	if p.APIKey != "" {
+		m["api_key"] = p.APIKey
+	}
+	if p.Site != "" {
+		m["site"] = p.Site
+	}
+	if len(p.Boot) > 0 {
+		bootList := make([]any, len(p.Boot))
+		for i, bc := range p.Boot {
+			stepsList := make([]any, len(bc.Steps))
+			for j, step := range bc.Steps {
+				stepsList[j] = map[string]any{
+					"keys":      toAnySlice(step.Keys),
+					"modifiers": toAnySlice(step.Modifiers),
+					"delay":     step.Delay,
+				}
+			}
+			bootList[i] = map[string]any{
+				"device": bc.Device,
+				"delay":  bc.Delay,
+				"steps":  stepsList,
+			}
+		}
+		m["boot"] = bootList
+	}
+	return m
+}
+
+func toAnySlice(ss []string) []any {
+	out := make([]any, len(ss))
+	for i, s := range ss {
+		out[i] = s
+	}
+	return out
+}
+
 var (
 	cfgFile string
+	cfgMu   sync.RWMutex
 	cfg     *Config
 )
 
@@ -142,13 +194,51 @@ func LoadConfig() (*Config, error) {
 	if err := validateConfig(&c); err != nil {
 		return nil, err
 	}
-	cfg = &c
+	UpdateConfig(&c)
 	return &c, nil
 }
 
-// GetConfig returns the loaded configuration.
+// GetConfig returns the loaded configuration in a thread-safe manner.
 func GetConfig() *Config {
+	cfgMu.RLock()
+	defer cfgMu.RUnlock()
 	return cfg
+}
+
+// UpdateConfig updates the global configuration in a thread-safe manner.
+func UpdateConfig(newCfg *Config) {
+	cfgMu.Lock()
+	defer cfgMu.Unlock()
+	cfg = newCfg
+}
+
+// OnChangeCallback defines a function to be called when config updates.
+type OnChangeCallback func(newConfig *Config)
+
+// WatchConfig monitors the configuration file for changes and reloads it automatically.
+// The onChange callback is invoked with the new validated configuration after each successful reload.
+func WatchConfig(logger *slog.Logger, onChange OnChangeCallback) {
+	viper.OnConfigChange(func(e fsnotify.Event) {
+		logger.Info("Config file changed", "name", e.Name)
+
+		var newCfg Config
+		if err := viper.Unmarshal(&newCfg); err != nil {
+			logger.Error("Failed to unmarshal new config", "error", err)
+			return
+		}
+
+		if err := validateConfig(&newCfg); err != nil {
+			logger.Error("Invalid new configuration, keeping old config", "error", err)
+			return
+		}
+
+		UpdateConfig(&newCfg)
+
+		if onChange != nil {
+			onChange(&newCfg)
+		}
+	})
+	viper.WatchConfig()
 }
 
 func validateConfig(config *Config) error {

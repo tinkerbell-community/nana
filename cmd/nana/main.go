@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/KimMachineGun/automemlimit/memlimit"
@@ -56,59 +57,135 @@ func (rw *responseWriter) WriteHeader(code int) {
 	rw.ResponseWriter.WriteHeader(code)
 }
 
+// ServerState holds the reloadable server components.
+type ServerState struct {
+	dm         *providers.DeviceManager
+	rpcSvc     api.RpcService
+	redfishSvc api.RedfishService
+	mu         sync.RWMutex
+}
+
+// Reload rebuilds the DeviceManager and services from the given configuration.
+func (s *ServerState) Reload(newCfg *config.Config, logger *slog.Logger) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	logger.Info("Reloading server configuration...")
+
+	newDM, err := buildDeviceManager(newCfg, logger)
+	if err != nil {
+		logger.Error("Failed to build new device manager", "error", err)
+		return
+	}
+
+	rpcTimeout := time.Duration(newCfg.WebRTCTimeout) * time.Second
+	s.rpcSvc = api.NewBMCService(newDM, rpcTimeout, logger)
+	s.redfishSvc = api.NewRedfishService(newDM)
+	s.dm = newDM
+
+	logger.Info("Configuration reload complete", "devices", len(newCfg.Devices))
+}
+
+// RpcHandler delegates to the current RPC service instance.
+func (s *ServerState) RpcHandler(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	svc := s.rpcSvc
+	s.mu.RUnlock()
+	svc.RpcHandler(w, r)
+}
+
+// ServiceRoot delegates to the current Redfish service.
+func (s *ServerState) ServiceRoot(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	svc := s.redfishSvc
+	s.mu.RUnlock()
+	svc.ServiceRoot(w, r)
+}
+
+// Systems delegates to the current Redfish service.
+func (s *ServerState) Systems(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	svc := s.redfishSvc
+	s.mu.RUnlock()
+	svc.Systems(w, r)
+}
+
+// System delegates to the current Redfish service.
+func (s *ServerState) System(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	svc := s.redfishSvc
+	s.mu.RUnlock()
+	svc.System(w, r)
+}
+
+// SystemReset delegates to the current Redfish service.
+func (s *ServerState) SystemReset(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	svc := s.redfishSvc
+	s.mu.RUnlock()
+	svc.SystemReset(w, r)
+}
+
+// VirtualMediaCollection delegates to the current Redfish service.
+func (s *ServerState) VirtualMediaCollection(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	svc := s.redfishSvc
+	s.mu.RUnlock()
+	svc.VirtualMediaCollection(w, r)
+}
+
+// VirtualMedia delegates to the current Redfish service.
+func (s *ServerState) VirtualMedia(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	svc := s.redfishSvc
+	s.mu.RUnlock()
+	svc.VirtualMedia(w, r)
+}
+
+// VirtualMediaInsert delegates to the current Redfish service.
+func (s *ServerState) VirtualMediaInsert(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	svc := s.redfishSvc
+	s.mu.RUnlock()
+	svc.VirtualMediaInsert(w, r)
+}
+
+// VirtualMediaEject delegates to the current Redfish service.
+func (s *ServerState) VirtualMediaEject(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	svc := s.redfishSvc
+	s.mu.RUnlock()
+	svc.VirtualMediaEject(w, r)
+}
+
+// Managers delegates to the current Redfish service.
+func (s *ServerState) Managers(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	svc := s.redfishSvc
+	s.mu.RUnlock()
+	svc.Managers(w, r)
+}
+
+// Manager delegates to the current Redfish service.
+func (s *ServerState) Manager(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	svc := s.redfishSvc
+	s.mu.RUnlock()
+	svc.Manager(w, r)
+}
+
 func buildDeviceManager(cfg *config.Config, logger *slog.Logger) (*providers.DeviceManager, error) {
 	dm := providers.NewDeviceManager()
 
 	return dm, buildDevices(cfg, dm, logger)
 }
 
-func toAnySlice(ss []string) []any {
-	out := make([]any, len(ss))
-	for i, s := range ss {
-		out[i] = s
-	}
-	return out
-}
-
 func buildDevices(cfg *config.Config, dm *providers.DeviceManager, logger *slog.Logger) error {
 	for i, devCfg := range cfg.Devices {
 		var p []providers.Provider
 		for j, prvCfg := range devCfg.Providers {
-			prvMap := map[string]any{
-				"type": prvCfg.Type,
-				"mac":  devCfg.MAC,
-			}
-			if prvCfg.Host != "" {
-				prvMap["host"] = prvCfg.Host
-			}
-			if prvCfg.Password != "" {
-				prvMap["password"] = prvCfg.Password
-			}
-			if prvCfg.APIKey != "" {
-				prvMap["api_key"] = prvCfg.APIKey
-			}
-			if prvCfg.Site != "" {
-				prvMap["site"] = prvCfg.Site
-			}
-			if len(prvCfg.Boot) > 0 {
-				bootList := make([]any, len(prvCfg.Boot))
-				for bi, bc := range prvCfg.Boot {
-					stepsList := make([]any, len(bc.Steps))
-					for si, step := range bc.Steps {
-						stepsList[si] = map[string]any{
-							"keys":      toAnySlice(step.Keys),
-							"modifiers": toAnySlice(step.Modifiers),
-							"delay":     step.Delay,
-						}
-					}
-					bootList[bi] = map[string]any{
-						"device": bc.Device,
-						"delay":  bc.Delay,
-						"steps":  stepsList,
-					}
-				}
-				prvMap["boot"] = bootList
-			}
+			prvMap := prvCfg.ToMap()
+			prvMap["mac"] = devCfg.MAC
 
 			prv, err := providers.Create(prvCfg.Type, prvMap)
 			if err != nil {
@@ -226,22 +303,22 @@ Example:
 			}
 		}
 
-		dm, err := buildDeviceManager(cfg, logger)
-		if err != nil {
-			log.Fatalf("Error building device manager: %v", err)
-		}
+		// Initialize reloadable server state.
+		state := &ServerState{}
+		state.Reload(cfg, logger)
 
-		rpcTimeout := time.Duration(cfg.WebRTCTimeout) * time.Second
-		rpcSvc := api.NewBMCService(dm, rpcTimeout, logger)
-		redfishSvc := api.NewRedfishService(dm)
+		// Start watching the config file for changes.
+		config.WatchConfig(logger, func(newCfg *config.Config) {
+			state.Reload(newCfg, logger)
+		})
 
 		mux := http.NewServeMux()
 
 		// RPC endpoint (bmclib-compatible).
-		mux.HandleFunc("POST /rpc", rpcSvc.RpcHandler)
+		mux.HandleFunc("POST /rpc", state.RpcHandler)
 
-		// Redfish endpoints.
-		api.RegisterRedfishRoutes(mux, redfishSvc)
+		// Redfish endpoints (delegates to current service via ServerState).
+		api.RegisterRedfishRoutes(mux, state)
 
 		// Health check endpoint.
 		mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {

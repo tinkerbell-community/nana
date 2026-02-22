@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/csv"
 	"fmt"
+	"log/slog"
 	"net"
 	"strconv"
 	"strings"
@@ -26,7 +27,11 @@ var (
 	clients   = make(map[string]*unifi.ApiClient)
 )
 
-func getOrCreateClient(ctx context.Context, apiURL, apiKey string) (*unifi.ApiClient, error) {
+func getOrCreateClient(
+	ctx context.Context,
+	logger *slog.Logger,
+	apiURL, apiKey string,
+) (*unifi.ApiClient, error) {
 	clientsMu.Lock()
 	defer clientsMu.Unlock()
 
@@ -35,8 +40,10 @@ func getOrCreateClient(ctx context.Context, apiURL, apiKey string) (*unifi.ApiCl
 	}
 
 	c, err := unifi.New(ctx, &unifi.Config{
-		BaseURL: apiURL,
-		APIKey:  apiKey,
+		BaseURL:       apiURL,
+		APIKey:        apiKey,
+		Logger:        logger,
+		AllowInsecure: true,
 	})
 	if err != nil {
 		return nil, err
@@ -65,6 +72,8 @@ type Provider struct {
 	mu     sync.Mutex
 	client *unifi.ApiClient
 	uplink *uplinkInfo
+
+	logger *slog.Logger
 }
 
 func init() {
@@ -72,9 +81,9 @@ func init() {
 }
 
 func newProvider(cfg map[string]any) (providers.Provider, error) {
-	apiURL, _ := cfg["api_url"].(string)
+	apiURL, _ := cfg["host"].(string)
 	if apiURL == "" {
-		return nil, fmt.Errorf("unifi provider requires 'api_url' config")
+		return nil, fmt.Errorf("unifi provider requires 'host' config")
 	}
 
 	apiKey, _ := cfg["api_key"].(string)
@@ -92,7 +101,7 @@ func newProvider(cfg map[string]any) (providers.Provider, error) {
 		site = "default"
 	}
 
-	privatePEM, _, err := generateKeyFromAPI(apiKey)
+	privatePEM, _, err := generateSSHKey(apiKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate SSH key from API key: %w", err)
 	}
@@ -110,6 +119,8 @@ func newProvider(cfg map[string]any) (providers.Provider, error) {
 		Timeout:         30 * time.Second,
 	}
 
+	logger := slog.Default().With("provider", "unifi", "host", apiURL, "site", site, "mac", mac)
+
 	return &Provider{
 		apiURL:    apiURL,
 		apiKey:    apiKey,
@@ -117,6 +128,7 @@ func newProvider(cfg map[string]any) (providers.Provider, error) {
 		mac:       mac,
 		sshConfig: sshConfig,
 		sshPort:   22,
+		logger:    logger,
 	}, nil
 }
 
@@ -128,15 +140,29 @@ func (p *Provider) Capabilities() []providers.Capability {
 	return []providers.Capability{providers.CapPowerControl}
 }
 
+// ensureClient lazily initializes the UniFi API client if it has not been
+// opened yet. It is safe to call before every operation — Open is idempotent.
+func (p *Provider) ensureClient(ctx context.Context) error {
+	p.mu.Lock()
+	initialized := p.client != nil
+	p.mu.Unlock()
+
+	if initialized {
+		return nil
+	}
+
+	return p.Open(ctx)
+}
+
 // Open initializes the shared UniFi API client and provisions the SSH key if needed.
 func (p *Provider) Open(ctx context.Context) error {
-	client, err := getOrCreateClient(ctx, p.apiURL, p.apiKey)
+	client, err := getOrCreateClient(ctx, p.logger, p.apiURL, p.apiKey)
 	if err != nil {
 		return fmt.Errorf("failed to create UniFi API client: %w", err)
 	}
 	p.client = client
 
-	_, publicAuthorizedKey, err := generateKeyFromAPI(p.apiKey)
+	_, publicAuthorizedKey, err := generateSSHKey(p.apiKey)
 	if err != nil {
 		return fmt.Errorf("failed to generate SSH public key: %w", err)
 	}
@@ -160,6 +186,10 @@ func (p *Provider) Close() error {
 
 // resolveUplink discovers or returns the cached upstream switch IP and port.
 func (p *Provider) resolveUplink(ctx context.Context) (*uplinkInfo, error) {
+	if err := p.ensureClient(ctx); err != nil {
+		return nil, fmt.Errorf("failed to initialize UniFi client: %w", err)
+	}
+
 	p.mu.Lock()
 	if p.uplink != nil {
 		info := *p.uplink

@@ -7,14 +7,61 @@ import (
 	"encoding/pem"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/ubiquiti-community/go-unifi/unifi"
 	"github.com/ubiquiti-community/go-unifi/unifi/settings"
 	"golang.org/x/crypto/ssh"
 )
 
-// generateKeyFromAPI takes the UniFi API key and returns the SSH private and public keys.
-func generateKeyFromAPI(apiKey string) ([]byte, []byte, error) {
+var connPool = &sshConnectionPool{conns: make(map[string]*ssh.Client)}
+
+// sshConnectionPool manages reusable SSH connections keyed by address (host:port).
+// Multiple providers sharing the same upstream switch reuse the same connection.
+type sshConnectionPool struct {
+	mu    sync.Mutex
+	conns map[string]*ssh.Client
+}
+
+// get returns an existing connection for the address or dials a new one.
+func (p *sshConnectionPool) get(addr string, config *ssh.ClientConfig) (*ssh.Client, error) {
+	p.mu.Lock()
+	if c, ok := p.conns[addr]; ok {
+		p.mu.Unlock()
+		return c, nil
+	}
+	p.mu.Unlock()
+
+	c, err := ssh.Dial("tcp", addr, config)
+	if err != nil {
+		return nil, err
+	}
+
+	p.mu.Lock()
+	if existing, ok := p.conns[addr]; ok {
+		p.mu.Unlock()
+		err = c.Close()
+		return existing, err
+	}
+	p.conns[addr] = c
+	p.mu.Unlock()
+
+	return c, nil
+}
+
+// remove closes and removes a connection from the pool.
+func (p *sshConnectionPool) remove(addr string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if c, ok := p.conns[addr]; ok {
+		_ = c.Close()
+		delete(p.conns, addr)
+	}
+}
+
+// generateSSHKey takes the UniFi API key and returns the SSH private and public keys.
+func generateSSHKey(apiKey string) ([]byte, []byte, error) {
 	// 1. Add a static salt for domain separation.
 	// This ensures the hash is completely unique to this specific SSH use-case.
 	salt := "unifi-swctrl-ssh-seed-v1"
