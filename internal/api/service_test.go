@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tinkerbell-community/nana/pkg/providers"
+	"github.com/tinkerbell-community/nana/internal/providers"
 )
 
 // mockTestDriver implements all provider capability interfaces for testing.

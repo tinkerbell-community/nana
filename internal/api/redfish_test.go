@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/tinkerbell-community/nana/pkg/providers"
+	"github.com/tinkerbell-community/nana/internal/providers"
 )
 
 func newTestRedfishService() (RedfishService, *mockTestDriver) {

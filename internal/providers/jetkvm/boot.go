@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/tinkerbell-community/nana/pkg/providers/jetkvm/client"
+	"github.com/tinkerbell-community/nana/internal/providers/jetkvm/client"
 )
 
 // SetBootDevice queues a keyboard macro to select the requested boot device.

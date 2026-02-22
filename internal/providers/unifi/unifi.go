@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tinkerbell-community/nana/pkg/providers"
+	"github.com/tinkerbell-community/nana/internal/providers"
 	"github.com/ubiquiti-community/go-unifi/unifi"
 	"golang.org/x/crypto/ssh"
 )

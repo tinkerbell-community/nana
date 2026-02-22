@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tinkerbell-community/nana/pkg/providers"
-	"github.com/tinkerbell-community/nana/pkg/providers/jetkvm/client"
+	"github.com/tinkerbell-community/nana/internal/providers"
+	"github.com/tinkerbell-community/nana/internal/providers/jetkvm/client"
 )
 
 // MacroStep defines a single keyboard input step within a boot device macro.

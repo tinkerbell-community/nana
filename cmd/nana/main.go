@@ -11,11 +11,11 @@ import (
 
 	"github.com/KimMachineGun/automemlimit/memlimit"
 	"github.com/spf13/cobra"
-	"github.com/tinkerbell-community/nana/pkg/api"
-	"github.com/tinkerbell-community/nana/pkg/config"
-	"github.com/tinkerbell-community/nana/pkg/providers"
-	_ "github.com/tinkerbell-community/nana/pkg/providers/jetkvm" // register jetkvm provider
-	_ "github.com/tinkerbell-community/nana/pkg/providers/unifi"  // register unifi provider
+	"github.com/tinkerbell-community/nana/internal/api"
+	"github.com/tinkerbell-community/nana/internal/config"
+	"github.com/tinkerbell-community/nana/internal/providers"
+	_ "github.com/tinkerbell-community/nana/internal/providers/jetkvm" // register jetkvm provider
+	_ "github.com/tinkerbell-community/nana/internal/providers/unifi"  // register unifi provider
 	"go.uber.org/automaxprocs/maxprocs"
 )
 

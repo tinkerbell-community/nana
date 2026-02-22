@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/tinkerbell-community/nana/pkg/providers"
+	"github.com/tinkerbell-community/nana/internal/providers"
 )
 
 // RpcService defines the interface for the RPC handler service.

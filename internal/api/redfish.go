@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/tinkerbell-community/nana/pkg/providers"
+	"github.com/tinkerbell-community/nana/internal/providers"
 )
 
 // RedfishService provides Redfish v1 REST API endpoints.

@@ -1,142 +1,615 @@
-# JetKVM Management API
+# Nana
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/tinkerbell-community/nana.svg)](https://pkg.go.dev/github.com/tinkerbell-community/nana)
-[![go.mod](https://img.shields.io/github/go-mod/go-version/jetkvm/cloud-api)](go.mod)
+[![go.mod](https://img.shields.io/github/go-mod/go-version/tinkerbell-community/nana)](go.mod)
 
-A BMC-compatible management API server for local [JetKVM](https://github.com/jetkvm/kvm) devices, providing power management, virtual media control, and device administration via JSON-RPC over HTTP.
+**Nana** is a device management service that brings full BMC (Baseboard Management Controller) capabilities to any combination of remote management hardware. It provides two core functions: **BMC Emulation/Stitching** and **Device Discovery**.
+
+Nana is designed for environments where traditional BMC hardware (iDRAC, iLO, IMM) is unavailable — such as consumer-grade servers, single-board computers, PoE-powered devices, and mixed hardware fleets — by composing capabilities from multiple pluggable providers into a unified, standards-compliant BMC interface.
 
 ## Overview
 
-This server provides BMC-style management capabilities for JetKVM devices through their local WebRTC-based JSON-RPC interface. It's designed to integrate with Tinkerbell's hardware provisioning system and follows bmclib's RPC provider patterns.
+```mermaid
+graph TB
+    subgraph Clients
+        TK[Tinkerbell / Rufio]
+        BL[bmclib]
+        RF[Redfish Clients]
+        CL[curl / Scripts]
+    end
 
-## Key Features
+    subgraph "Nana Service"
+        RPC[JSON-RPC Endpoint<br/><code>POST /rpc</code>]
+        RED[Redfish v1 API<br/><code>/redfish/v1/*</code>]
+        DM[Device Manager]
+        PR[Provider Registry]
+    end
 
-- **BMC Compatible**: Standard `getPowerState`/`setPowerState`/`setVirtualMedia` methods for Tinkerbell/bmclib integration
-- **WebRTC Backend**: Communicates with JetKVM devices using their native WebRTC data channel protocol
-- **Multi-Device**: Manage multiple JetKVM devices from a single API instance via `X-Device` header routing
-- **Connection Pooling**: Persistent WebRTC connections to devices are pooled and reused
-- **ATX & DC Power**: Full support for ATX power actions (on/off/cycle/reset) and DC power control
-- **Virtual Media**: Mount ISOs and images from HTTP URLs onto managed machines
-- **JetKVM Extensions**: Access JetKVM-specific features (EDID, WOL, jiggler, video state, USB)
+    subgraph Providers
+        JK[JetKVM Provider<br/>power, media, boot, info]
+        UF[UniFi Provider<br/>PoE power control]
+        FP[Future Providers<br/>IPMI, WoL, GPIO, ...]
+    end
+
+    subgraph "Managed Infrastructure"
+        KVM1[JetKVM Device]
+        KVM2[JetKVM Device]
+        USW[UniFi Switch]
+        SRV1[Server 1]
+        SRV2[Raspberry Pi]
+    end
+
+    TK & BL --> RPC
+    RF --> RED
+    CL --> RPC & RED
+    RPC & RED --> DM
+    DM --> PR
+    PR --> JK & UF & FP
+    JK -- "WebRTC / JSON-RPC" --> KVM1 & KVM2
+    UF -- "SSH / swctrl" --> USW
+    KVM1 -. "ATX/DC/USB/Video" .-> SRV1
+    USW -. "PoE Port" .-> SRV2
+```
+
+## Key Functions
+
+### 1. BMC Emulation & Stitching
+
+Nana's primary function is to **emulate a full BMC** by stitching together capabilities from multiple provider backends. Not every device has a traditional BMC — Nana solves this by composing partial capabilities from different sources into a single, unified management interface.
+
+**How it works:**
+
+- Each provider implements a subset of BMC capabilities (power control, virtual media, boot device selection, BMC info)
+- A single managed device can have **multiple providers**, and their capabilities are **merged** at runtime
+- The merged capability set is exposed through both **bmclib-compatible JSON-RPC** and **DMTF Redfish v1** APIs
+- Providers can be mixed freely — for example, a JetKVM providing KVM/virtual media and a UniFi switch providing PoE power control for the same device
+
+```mermaid
+graph LR
+    subgraph "Managed Device: hybrid-server"
+        direction TB
+        MAC["MAC: AA:BB:CC:DD:EE:FF"]
+    end
+
+    subgraph "Provider 1: JetKVM"
+        JK_VM[Virtual Media]
+        JK_BI[BMC Info]
+        JK_BD[Boot Device<br/>keyboard macros]
+    end
+
+    subgraph "Provider 2: UniFi"
+        UF_PC[PoE Power Control]
+    end
+
+    MAC --> JK_VM & JK_BI & JK_BD & UF_PC
+
+    subgraph "Merged Capabilities"
+        CAP_PC[power_control ✓]
+        CAP_VM[virtual_media ✓]
+        CAP_BD[boot_device ✓]
+        CAP_BI[bmc_info ✓]
+    end
+
+    UF_PC --> CAP_PC
+    JK_VM --> CAP_VM
+    JK_BD --> CAP_BD
+    JK_BI --> CAP_BI
+```
+
+**Supported capability matrix:**
+
+| Capability | JetKVM | UniFi | Description |
+| --- | :---: | :---: | --- |
+| `power_control` | ✓ (ATX/DC) | ✓ (PoE) | Get/set power state (on, off, cycle, reset) |
+| `virtual_media` | ✓ | — | Mount/unmount ISO images via HTTP URL |
+| `boot_device` | ✓ (macros) | — | Set next boot device via keyboard macro sequences |
+| `bmc_info` | ✓ | — | Get BMC firmware version |
+
+**Partial configuration** is fully supported — a device backed only by a UniFi provider will expose only power control through Redfish and RPC, while the remaining capabilities gracefully return "not supported" errors.
+
+### 2. Device Discovery
+
+> **Status: Planned**
+
+Nana aims to support automated device inventory population through multiple discovery mechanisms:
+
+**Discovery pipeline:**
+
+```mermaid
+flowchart TD
+    START([Discovery Triggers]) --> NET[Network Discovery]
+    START --> HOOK[HookOS Export]
+    START --> UNIFI[UniFi Controller API]
+
+    NET --> |"ARP / mDNS / LLDP"| MAC_FOUND{MAC Address Found}
+    UNIFI --> |"Client List API"| MAC_FOUND
+    HOOK --> |"Hardware Report"| FULL_INFO[Full SMBIOS Data]
+
+    MAC_FOUND --> VENDOR[OUI Vendor Lookup]
+    VENDOR --> MATCH{Matches Config Rules?}
+    MATCH --> |Yes| SCAFFOLD[Scaffold Device Entry]
+    MATCH --> |No| DISCARD[Ignore]
+
+    SCAFFOLD --> ENRICH[Enrichment Queue]
+    ENRICH --> |"SMBIOS / LLDP / SNMP"| DETAIL[Detailed Device Info]
+    FULL_INFO --> DETAIL
+    DETAIL --> REGISTER[Register in Device Manager]
+
+    REGISTER --> TINK[Push to Tinkerbell Hardware CRD]
+```
+
+**Priority queue for device information:**
+
+Nana uses a decision tree to progressively enrich device information, starting from the minimum viable data (a MAC address) and seeking full SMBIOS information:
+
+```mermaid
+stateDiagram-v2
+    [*] --> MACDiscovered: Network scan / provider event
+    MACDiscovered --> VendorMatched: OUI lookup
+    VendorMatched --> DeviceScaffolded: Match against config rules
+    DeviceScaffolded --> SMBIOSPartial: LLDP / SNMP query
+    SMBIOSPartial --> SMBIOSFull: HookOS export / direct probe
+    SMBIOSFull --> Registered: Complete device record
+    Registered --> [*]
+
+    MACDiscovered --> Ignored: No vendor match / not configured
+    VendorMatched --> Ignored: Excluded by rules
+```
+
+**Planned discovery features:**
+
+- **Network discovery** — ARP scanning, mDNS, LLDP to find devices on the local network
+- **Provider-sourced discovery** — UniFi controller client lists, switch MAC tables, DHCP leases
+- **OUI vendor matching** — Match discovered MAC addresses against known vendor prefixes (e.g., Raspberry Pi Foundation) to auto-classify devices
+- **HookOS integration** — Collect detailed hardware information (SMBIOS, disk, NIC data) exported by [HookOS](https://github.com/tinkerbell/hook) to Tinkerbell Hardware CRDs
+- **Device matching rules** — Configurable rules to auto-populate the device list based on discovery. For example: "All Raspberry Pis discovered via UniFi should be added as PoE-powered devices with UniFi power control"
+- **Progressive enrichment** — Start with a MAC address, progressively gather vendor info, LLDP data, SNMP details, and full SMBIOS records through a priority queue
+
+## Supported Providers
+
+### JetKVM
+
+The [JetKVM](https://github.com/jetkvm/kvm) provider connects to local JetKVM devices via WebRTC and provides comprehensive BMC capabilities.
+
+**Capabilities:** `power_control`, `virtual_media`, `bmc_info`, `boot_device` (when boot macros are configured)
+
+**Connection flow:**
+
+```mermaid
+sequenceDiagram
+    participant N as Nana
+    participant K as JetKVM Device
+
+    N->>K: POST /auth/login-local (password)
+    K-->>N: Session cookie
+
+    N->>K: WebSocket /webrtc/signaling/client
+    K-->>N: Device metadata
+
+    N->>K: SDP Offer (base64)
+    K-->>N: SDP Answer (base64)
+    Note over N,K: ICE candidate exchange
+
+    N->>K: WebRTC Data Channel "rpc" opened
+    Note over N,K: JSON-RPC over DataChannel
+
+    N->>K: {"method": "getATXState"}
+    K-->>N: {"result": {"powerLED": true}}
+```
+
+**Power management:**
+
+- Detects active extension (`atx-power` or `dc-power`) automatically
+- ATX: power-on, power-off, power-cycle, reset via front panel header emulation
+- DC: on/off via DC power control extension
+- Polls power state after action until desired state is reached
+- Sends Wake-on-LAN magic packets on power-on (if WoL devices configured)
+
+**Virtual media:**
+
+- Mount ISO/disk images from HTTP URLs
+- Supports `cdrom` and `floppy` modes
+- Query current mount state
+
+**Boot device macros:**
+
+- Configurable keyboard macro sequences to select boot devices in BIOS/UEFI
+- Macros are queued and executed after power-on, once the display and USB are ready
+- Waits for video signal and USB "configured" state before sending keystrokes
+- Supports HID key codes, modifiers, and per-step delays
+
+**Configuration:**
+
+```yaml
+providers:
+  - type: "jetkvm"
+    host: "192.168.1.100"      # JetKVM device IP
+    password: "optional"        # Device password (empty for noPassword mode)
+    boot:                       # Optional boot device macros
+      - device: "pxe"
+        delay: 2s               # Wait after power-on
+        steps:
+          - keys: ["f12"]       # Press F12 for boot menu
+            delay: 2s
+          - keys: ["down"]
+            delay: 500ms
+          - keys: ["enter"]
+```
+
+### UniFi
+
+The UniFi provider controls PoE power on Ubiquiti switches via the UniFi Controller API and SSH.
+
+**Capabilities:** `power_control`
+
+**How it works:**
+
+```mermaid
+sequenceDiagram
+    participant N as Nana
+    participant UC as UniFi Controller
+    participant SW as UniFi Switch
+
+    Note over N: Power state request for MAC AA:BB:CC:DD:EE:FF
+
+    N->>UC: GetClientInfo(site, MAC)
+    UC-->>N: uplinkMAC, switchPort
+
+    N->>UC: GetDeviceByMAC(site, uplinkMAC)
+    UC-->>N: Switch IP
+
+    N->>SW: SSH: swctrl poe show id {port}
+    SW-->>N: PoE status table
+
+    Note over N: Parse PoE status → "on" / "off"
+
+    N->>SW: SSH: swctrl poe set auto id {port}
+    Note over N: PoE power restored
+```
+
+**Key features:**
+
+- **Auto-discovery of upstream switch and port** — Given only the device's MAC address, Nana queries the UniFi controller API to find which switch and port the device is connected to
+- **SSH key derivation** — Deterministically generates an Ed25519 SSH key from the UniFi API key (no separate key management needed)
+- **Auto-provisioned SSH access** — Automatically ensures the derived SSH public key is present in the UniFi controller's management settings
+- **SSH connection pooling** — Reuses SSH connections to switches across multiple operations and providers
+- **Retry with re-discovery** — On SSH failure, invalidates the cached uplink info and re-discovers the switch/port before retrying
+- **PoE commands** — Uses `swctrl poe` CLI commands over SSH:
+  - `swctrl poe show id {port}` — Get port PoE status
+  - `swctrl poe set auto id {port}` — Enable PoE (power on)
+  - `swctrl poe set off id {port}` — Disable PoE (power off)
+  - `swctrl poe restart id {port}` — Power cycle
+
+**Configuration:**
+
+```yaml
+providers:
+  - type: "unifi"
+    api_key: "your-unifi-api-key"  # UniFi API key (also used for SSH key derivation)
+    site: "default"                 # UniFi site name
+```
+
+## API Reference
+
+### JSON-RPC Endpoint (`POST /rpc`)
+
+bmclib-compatible JSON-RPC interface. Device identified by `X-Device` header (name or MAC) or `host` field in JSON body.
+
+**Request format:**
+
+```json
+{"id": 1, "host": "server-01", "method": "getPowerState", "params": {}}
+```
+
+**BMC-compatible methods:**
+
+| Method | Params | Description |
+| --- | --- | --- |
+| `getPowerState` | — | Returns `"on"`, `"off"`, or `"unknown"` |
+| `setPowerState` | `{"state": "on\|off\|cycle\|reset"}` | Set power state |
+| `setVirtualMedia` | `{"mediaUrl": "...", "kind": "cdrom"}` | Mount media (empty URL to unmount) |
+| `setBootDevice` | `{"device": "pxe", "persistent": false, "efiBoot": true}` | Set next boot device |
+| `getVersion` | — | Get BMC firmware version |
+| `ping` | — | Health check, returns `"pong"` |
+
+**Extended methods:**
+
+| Method | Params | Description |
+| --- | --- | --- |
+| `mountMedia` | `{"url": "...", "mode": "cdrom"}` | Mount media (direct) |
+| `unmountMedia` | — | Unmount current media |
+| `getMediaState` | — | Get current virtual media state |
+
+### Redfish v1 API
+
+DMTF Redfish-compliant REST API with OData annotations.
+
+| Endpoint | Method | Description |
+| --- | --- | --- |
+| `/redfish/v1/` | GET | Service Root |
+| `/redfish/v1/Systems` | GET | Computer System Collection |
+| `/redfish/v1/Systems/{id}` | GET | Computer System (power state, actions, MAC) |
+| `/redfish/v1/Systems/{id}/Actions/ComputerSystem.Reset` | POST | Reset system (`ResetType`: On, ForceOff, GracefulShutdown, ForceRestart) |
+| `/redfish/v1/Systems/{id}/VirtualMedia` | GET | Virtual Media Collection |
+| `/redfish/v1/Systems/{id}/VirtualMedia/{vmId}` | GET | Virtual Media instance |
+| `/redfish/v1/Systems/{id}/VirtualMedia/{vmId}/Actions/VirtualMedia.InsertMedia` | POST | Insert media |
+| `/redfish/v1/Systems/{id}/VirtualMedia/{vmId}/Actions/VirtualMedia.EjectMedia` | POST | Eject media |
+| `/redfish/v1/Managers` | GET | Manager Collection |
+| `/redfish/v1/Managers/{id}` | GET | Manager (firmware version, capabilities) |
+| `/healthz` | GET | Service health check |
+
+**System ID** is the device name (if set) or MAC address with colons replaced by dashes (e.g., `AA-BB-CC-DD-EE-FF`).
+
+### Request Flow
+
+```mermaid
+flowchart TD
+    REQ([Incoming Request]) --> EP{Endpoint?}
+
+    EP --> |POST /rpc| RPC[JSON-RPC Handler]
+    EP --> |/redfish/v1/*| REDFISH[Redfish Handler]
+
+    RPC --> PARSE[Parse JSON-RPC Body]
+    PARSE --> PING{Method = ping?}
+    PING --> |Yes| PONG([Return pong])
+    PING --> |No| RESOLVE
+
+    REDFISH --> RESOLVE[Resolve Device]
+    RESOLVE --> HDR{X-Device header?}
+    HDR --> |Yes| LOOKUP_HDR[Find by name or MAC]
+    HDR --> |No| HOST{host field in body?}
+    HOST --> |Yes| LOOKUP_HOST[Find by name or MAC]
+    HOST --> |No| PATH{System ID in URL path?}
+    PATH --> |Yes| LOOKUP_PATH[Find by ID or MAC]
+    PATH --> |No| ERR([Error: device required])
+
+    LOOKUP_HDR & LOOKUP_HOST & LOOKUP_PATH --> DEV[ManagedDevice]
+
+    DEV --> CAP{Has required capability?}
+    CAP --> |Yes| EXEC[Execute via Provider]
+    CAP --> |No| NOCAP([Error: not supported])
+
+    EXEC --> RESP([Return Response])
+```
 
 ## Architecture
 
+### Capability-Based Provider System
+
+```mermaid
+classDiagram
+    class Provider {
+        <<interface>>
+        +Name() string
+        +Capabilities() []Capability
+        +Open(ctx) error
+        +Close() error
+    }
+
+    class PowerController {
+        <<interface>>
+        +GetPowerState(ctx) string, error
+        +SetPowerState(ctx, state) error
+    }
+
+    class VirtualMediaController {
+        <<interface>>
+        +MountMedia(ctx, url, kind) error
+        +UnmountMedia(ctx) error
+        +GetMediaState(ctx) VirtualMediaState, error
+    }
+
+    class BootDeviceController {
+        <<interface>>
+        +SetBootDevice(ctx, device, persistent, efiBoot) error
+    }
+
+    class BMCInfoProvider {
+        <<interface>>
+        +GetBMCVersion(ctx) string, error
+    }
+
+    class ManagedDevice {
+        +Name string
+        +MAC string
+        +Providers []Provider
+        +ID() string
+        +HasCapability(cap) bool
+        +PowerController() PowerController
+        +VirtualMediaController() VirtualMediaController
+        +BootDeviceController() BootDeviceController
+        +BMCInfoProvider() BMCInfoProvider
+        +MergedCapabilities() []Capability
+    }
+
+    class DeviceManager {
+        +AddDevice(device)
+        +FindDevice(id) ManagedDevice
+        +AllDevices() []ManagedDevice
+    }
+
+    class Registry {
+        +Register(name, factory)
+        +Create(name, cfg) Provider
+        +Available() []string
+    }
+
+    Provider <|.. JetKVMProvider
+    Provider <|.. UniFiProvider
+    PowerController <|.. JetKVMProvider
+    PowerController <|.. UniFiProvider
+    VirtualMediaController <|.. JetKVMProvider
+    BootDeviceController <|.. JetKVMProvider
+    BMCInfoProvider <|.. JetKVMProvider
+
+    ManagedDevice o-- Provider : 1..*
+    DeviceManager o-- ManagedDevice : 0..*
+    Registry --> Provider : creates
 ```
-┌─────────────────┐       ┌─────────────────┐       ┌──────────────┐
-│  Tinkerbell /   │ HTTP  │   JetKVM        │ WebRTC│   JetKVM     │
-│  bmclib client  │──────▶│   Management    │──────▶│   Device     │
-│                 │       │   API           │       │   (local)    │
-└─────────────────┘       └─────────────────┘       └──────────────┘
-                            │ X-Device: IP
-                            │ JSON-RPC body
-```
 
-### Header-Based Device Routing
+### Directory Structure
 
 ```
-POST /
-Headers:
-  X-Device: 192.168.1.100
-  X-Device-Password: optional-password
-Body:
-  {"method": "getPowerState", "id": 1}
-```
-
-The server translates BMC RPC calls into JetKVM JSON-RPC commands sent over WebRTC:
-
-| BMC Method | JetKVM RPC | Description |
-|---|---|---|
-| `getPowerState` | `getATXState` / `getDCPowerState` | Get machine power state |
-| `setPowerState(on)` | `setATXPowerAction("power-on")` | Power on the machine |
-| `setPowerState(off)` | `setATXPowerAction("power-off")` | Power off the machine |
-| `setPowerState(cycle)` | `setATXPowerAction("power-cycle")` | Power cycle the machine |
-| `setPowerState(reset)` | `setATXPowerAction("reset")` | Reset the machine |
-| `setVirtualMedia` | `mountWithHTTP` / `unmountImage` | Mount/unmount ISO images |
-| `setBootDevice` | _(acknowledged)_ | Not directly supported; use virtual media |
-| `ping` | _(local)_ | Health check |
-
-### JetKVM-Specific Methods
-
-| Method | Description |
-|---|---|
-| `getDeviceInfo` | Get device ID, auth mode |
-| `getVersion` | Get firmware version |
-| `tryUpdate` | Trigger OTA update |
-| `getVideoState` | Get video capture state |
-| `getUSBState` | Get USB emulation state |
-| `mountMedia` | Mount image with URL and mode |
-| `unmountMedia` | Unmount current media |
-| `getMediaState` | Get virtual media state |
-| `sendWOL` | Send Wake-on-LAN packet |
-| `setJiggler` | Enable/disable mouse jiggler |
-| `getEDID` / `setEDID` | Get/set EDID |
-| `getATXState` | Get ATX power LEDs |
-| `setATXPower` | Send ATX power action |
-| `getDCPowerState` | Get DC power state |
-| `setDCPowerState` | Set DC power state |
-
-## Installation
-
-```bash
-go build -o jetkvm-api ./cmd/nana
+nana/
+├── cmd/nana/              # CLI entrypoint (Cobra command, HTTP server setup)
+│   ├── main.go            # Server bootstrap, provider registration, route binding
+│   └── main_test.go
+├── internal/
+│   ├── api/               # HTTP handlers
+│   │   ├── payload.go     # JSON-RPC request/response types and method constants
+│   │   ├── service.go     # bmclib-compatible JSON-RPC handler
+│   │   ├── redfish.go     # Redfish v1 REST API handlers
+│   │   ├── service_test.go
+│   │   └── redfish_test.go
+│   ├── config/            # Configuration (Viper + Cobra flags)
+│   │   ├── config.go      # Config structs, validation, loading
+│   │   └── config_test.go
+│   └── providers/         # Provider framework
+│       ├── providers.go   # Capability interfaces (Provider, PowerController, etc.)
+│       ├── registry.go    # Factory registry, DeviceManager, ManagedDevice
+│       ├── providers_test.go
+│       ├── jetkvm/        # JetKVM provider implementation
+│       │   ├── jetkvm.go  # Provider struct, factory, boot config parsing
+│       │   ├── power.go   # Power control (ATX/DC, WoL, device readiness)
+│       │   ├── media.go   # Virtual media mount/unmount
+│       │   ├── boot.go    # Boot device keyboard macros
+│       │   ├── info.go    # BMC version info
+│       │   └── client/    # WebRTC JSON-RPC client for JetKVM devices
+│       │       ├── jetkvm.go      # Full client: WebRTC, data channel, RPC calls
+│       │       └── jetkvm_test.go
+│       └── unifi/         # UniFi provider implementation
+│           ├── unifi.go   # Provider struct, factory, uplink discovery, SSH execution
+│           ├── power.go   # PoE power control via swctrl
+│           ├── ssh_pool.go # SSH connection pool
+│           ├── ssh_key.go # Deterministic SSH key derivation from API key
+│           └── unifi_test.go
+├── example-config.yaml    # Annotated example configuration
+├── Dockerfile             # Multi-stage container build
+├── Makefile               # Build, test, lint targets
+└── go.mod
 ```
 
 ## Configuration
 
-Configuration is handled through command line flags, environment variables, or a YAML config file.
+Configuration via YAML file, environment variables (`JETKVM_API_` prefix), or CLI flags.
 
-### Environment Variables
+### Server Settings
 
-All environment variables are prefixed with `JETKVM_API_`:
+| Setting | CLI Flag | Env Var | Default | Description |
+| --- | --- | --- | --- | --- |
+| `port` | `--port` | `JETKVM_API_PORT` | `5000` | HTTP server port |
+| `address` | `--address` | `JETKVM_API_ADDRESS` | `0.0.0.0` | HTTP server bind address |
+| `log_level` | `--log-level` | `JETKVM_API_LOG_LEVEL` | `info` | Log level (debug, info, warn, error) |
+| `webrtc_timeout` | `--webrtc-timeout` | `JETKVM_API_WEBRTC_TIMEOUT` | `30` | WebRTC connection timeout (seconds) |
+| `maxprocs_enable` | — | `JETKVM_API_MAXPROCS_ENABLE` | `true` | Auto-set GOMAXPROCS |
+| `memlimit_enable` | — | `JETKVM_API_MEMLIMIT_ENABLE` | `true` | Auto-set GOMEMLIMIT |
+| `memlimit_ratio` | — | `JETKVM_API_MEMLIMIT_RATIO` | `0.9` | Memory limit ratio |
 
-| Environment Variable | Default | Description |
-|---|---|---|
-| `JETKVM_API_PORT` | `5000` | Port to listen on |
-| `JETKVM_API_ADDRESS` | `0.0.0.0` | Address to listen on |
-| `JETKVM_API_DEVICE_HOST` | _(optional)_ | Default JetKVM device IP/hostname |
-| `JETKVM_API_DEVICE_PASSWORD` | _(optional)_ | Default device password |
-| `JETKVM_API_WEBRTC_TIMEOUT` | `30` | WebRTC connection timeout (seconds) |
+### Device Configuration
 
-### Command Line Flags
-
-| Flag | Default | Description |
-|---|---|---|
-| `--port` | `5000` | Port to listen on |
-| `--address` | `0.0.0.0` | Address to listen on |
-| `--device-host` | _(optional)_ | Default JetKVM device IP/hostname |
-| `--device-password` | _(optional)_ | Default device password |
-| `--webrtc-timeout` | `30` | WebRTC connection timeout (seconds) |
-| `--config` | | Config file path (optional) |
-| `--help` | | Show help message |
-
-### Configuration Examples
-
-**Using environment variables:**
-```bash
-export JETKVM_API_DEVICE_HOST="192.168.1.100"
-export JETKVM_API_PORT="8080"
-./jetkvm-api
-```
-
-**Using command line flags:**
-```bash
-./jetkvm-api \
-  --device-host="192.168.1.100" \
-  --port=8080
-```
-
-**Using config file (jetkvm-api.yaml):**
 ```yaml
-port: 5000
-address: "0.0.0.0"
-device_host: "192.168.1.100"
-device_password: ""
-webrtc_timeout: 30
+devices:
+  # Device with a single JetKVM provider (full BMC)
+  - name: "server-01"
+    mac: "AA:BB:CC:DD:EE:FF"
+    providers:
+      - type: "jetkvm"
+        host: "192.168.1.100"
+        password: ""
+
+  # Device with JetKVM + boot macros
+  - name: "server-02"
+    mac: "11:22:33:44:55:66"
+    providers:
+      - type: "jetkvm"
+        host: "192.168.1.101"
+        password: "secret"
+        boot:
+          - device: "pxe"
+            delay: 1s
+            steps:
+              - keys: ["f12"]
+                delay: 2s
+              - keys: ["down"]
+                delay: 500ms
+              - keys: ["enter"]
+
+  # Device powered via UniFi PoE (power control only)
+  - name: "rpi-cluster-01"
+    mac: "DC:A6:32:XX:YY:ZZ"
+    providers:
+      - type: "unifi"
+        api_key: "your-api-key"
+        site: "default"
+
+  # Hybrid: JetKVM for KVM + UniFi for PoE power
+  - name: "hybrid-server"
+    mac: "AA:BB:CC:DD:EE:02"
+    providers:
+      - type: "jetkvm"
+        host: "192.168.1.102"
+      - type: "unifi"
+        api_key: "your-api-key"
+        site: "default"
 ```
 
-Then run:
-```bash
-./jetkvm-api --config=jetkvm-api.yaml
+### Provider Capability Composition
+
+When multiple providers are assigned to a device, Nana merges their capabilities:
+
+```mermaid
+flowchart LR
+    subgraph "Config: hybrid-server"
+        P1["jetkvm<br/>→ virtual_media, bmc_info, boot_device"]
+        P2["unifi<br/>→ power_control"]
+    end
+
+    P1 & P2 --> MERGE["MergedCapabilities()"]
+
+    MERGE --> OUT["power_control ✓<br/>virtual_media ✓<br/>boot_device ✓<br/>bmc_info ✓"]
+```
+
+When a capability is requested (e.g., `getPowerState`), the Device Manager returns the **first provider** that implements the required interface. This means provider order in the config determines priority.
+
+## Tinkerbell Integration
+
+Nana is designed as a companion service for [Tinkerbell](https://tinkerbell.org/), providing BMC management for hardware that lacks traditional BMC support.
+
+### With Rufio (BMC Controller)
+
+```yaml
+apiVersion: bmc.tinkerbell.org/v1alpha1
+kind: Machine
+metadata:
+  name: jetkvm-server-1
+spec:
+  connection:
+    host: nana-service:5000
+    providerOptions:
+      rpc:
+        consumerURL: http://nana-service:5000
+        request:
+          staticHeaders:
+            X-Device: ["server-01"]
+```
+
+### With bmclib
+
+```go
+client := bmclib.NewClient("nana-service", "", "",
+    bmclib.WithRPCOpt(rpc.Provider{
+        ConsumerURL: "http://nana-service:5000",
+        Opts: rpc.Opts{
+            Request: rpc.RequestOpts{
+                StaticHeaders: http.Header{
+                    "X-Device": []string{"server-01"},
+                },
+            },
+        },
+    }),
+)
+
+err := client.SetPowerState("on")
 ```
 
 ## Usage
@@ -144,186 +617,97 @@ Then run:
 ### Start the Server
 
 ```bash
-# With default device
-./jetkvm-api --device-host="192.168.1.100"
-
-# Without default device (X-Device header required per request)
-./jetkvm-api
+# With config file
+./nana --config=config.yaml
 
 # Show help
-./jetkvm-api --help
+./nana --help
 ```
 
-### BMC-Compatible Requests
+### Example Requests
 
 ```bash
-# Get power status
-curl -X POST http://localhost:5000/ \
-  -H "X-Device: 192.168.1.100" \
+# Health check (no device needed)
+curl -s -X POST http://localhost:5000/rpc \
+  -H "Content-Type: application/json" \
+  -d '{"method": "ping", "id": 1}'
+# → {"id":1,"result":"pong"}
+
+# Get power state via RPC
+curl -s -X POST http://localhost:5000/rpc \
+  -H "X-Device: server-01" \
   -H "Content-Type: application/json" \
   -d '{"method": "getPowerState", "id": 1}'
+# → {"id":1,"result":"on"}
 
-# Response:
-# {"id":1,"result":"on"}
-
-# Power on
-curl -X POST http://localhost:5000/ \
-  -H "X-Device: 192.168.1.100" \
+# Power cycle via RPC
+curl -s -X POST http://localhost:5000/rpc \
+  -H "X-Device: server-01" \
   -H "Content-Type: application/json" \
-  -d '{"method": "setPowerState", "params": {"state": "on"}, "id": 2}'
+  -d '{"method": "setPowerState", "params": {"state": "cycle"}, "id": 2}'
 
-# Response:
-# {"id":2,"result":"ok"}
-
-# Power cycle
-curl -X POST http://localhost:5000/ \
-  -H "X-Device: 192.168.1.100" \
+# Mount ISO via RPC
+curl -s -X POST http://localhost:5000/rpc \
+  -H "X-Device: server-01" \
   -H "Content-Type: application/json" \
-  -d '{"method": "setPowerState", "params": {"state": "cycle"}, "id": 3}'
+  -d '{"method": "setVirtualMedia", "params": {"mediaUrl": "http://example.com/boot.iso", "kind": "cdrom"}, "id": 3}'
 
-# Mount ISO
-curl -X POST http://localhost:5000/ \
-  -H "X-Device: 192.168.1.100" \
+# Get power state via Redfish
+curl -s http://localhost:5000/redfish/v1/Systems/server-01 | jq .PowerState
+# → "On"
+
+# Reset via Redfish
+curl -s -X POST http://localhost:5000/redfish/v1/Systems/server-01/Actions/ComputerSystem.Reset \
   -H "Content-Type: application/json" \
-  -d '{"method": "setVirtualMedia", "params": {"mediaUrl": "http://example.com/boot.iso", "kind": "cdrom"}, "id": 4}'
+  -d '{"ResetType": "ForceRestart"}'
 
-# Health check
-curl -X POST http://localhost:5000/ \
+# Insert virtual media via Redfish
+curl -s -X POST http://localhost:5000/redfish/v1/Systems/server-01/VirtualMedia/1/Actions/VirtualMedia.InsertMedia \
   -H "Content-Type: application/json" \
-  -d '{"method": "ping", "id": 5}'
-
-# Response:
-# {"id":5,"result":"pong"}
+  -d '{"Image": "http://example.com/boot.iso"}'
 ```
-
-### JetKVM-Specific Requests
-
-```bash
-# Get device info
-curl -X POST http://localhost:5000/ \
-  -H "X-Device: 192.168.1.100" \
-  -H "Content-Type: application/json" \
-  -d '{"method": "getDeviceInfo", "id": 1}'
-
-# Get firmware version
-curl -X POST http://localhost:5000/ \
-  -H "X-Device: 192.168.1.100" \
-  -H "Content-Type: application/json" \
-  -d '{"method": "getVersion", "id": 2}'
-
-# Get video state
-curl -X POST http://localhost:5000/ \
-  -H "X-Device: 192.168.1.100" \
-  -H "Content-Type: application/json" \
-  -d '{"method": "getVideoState", "id": 3}'
-
-# Mount media directly
-curl -X POST http://localhost:5000/ \
-  -H "X-Device: 192.168.1.100" \
-  -H "Content-Type: application/json" \
-  -d '{"method": "mountMedia", "params": {"url": "http://example.com/boot.iso", "mode": "cdrom"}, "id": 4}'
-
-# Send Wake-on-LAN
-curl -X POST http://localhost:5000/ \
-  -H "X-Device: 192.168.1.100" \
-  -H "Content-Type: application/json" \
-  -d '{"method": "sendWOL", "params": {"macAddress": "aa:bb:cc:dd:ee:ff"}, "id": 5}'
-
-# Set ATX power action
-curl -X POST http://localhost:5000/ \
-  -H "X-Device: 192.168.1.100" \
-  -H "Content-Type: application/json" \
-  -d '{"method": "setATXPower", "params": {"action": "power-cycle"}, "id": 6}'
-```
-
-## Tinkerbell Integration
-
-This server is designed to work with Tinkerbell's BMC provider system:
-
-```yaml
-apiVersion: tinkerbell.org/v1alpha1
-kind: Hardware
-spec:
-  bmcRef:
-    apiVersion: bmc.tinkerbell.org/v1alpha1
-    kind: Machine
-    name: jetkvm-server-1
----
-apiVersion: bmc.tinkerbell.org/v1alpha1
-kind: Machine
-metadata:
-  name: jetkvm-server-1
-spec:
-  connection:
-    host: jetkvm-api-server:5000
-    providerOptions:
-      rpc:
-        consumerURL: http://jetkvm-api-server:5000
-        request:
-          staticHeaders:
-            X-Device: ["192.168.1.100"]
-```
-
-## bmclib Integration
-
-Compatible with bmclib's RPC provider:
-
-```go
-import "github.com/bmc-toolbox/bmclib/v2"
-
-client := bmclib.NewClient("jetkvm-api-server", "", "",
-    bmclib.WithRPCOpt(rpc.Provider{
-        ConsumerURL: "http://jetkvm-api-server:5000",
-        Opts: rpc.Opts{
-            Request: rpc.RequestOpts{
-                StaticHeaders: http.Header{
-                    "X-Device": []string{"192.168.1.100"},
-                },
-            },
-        },
-    }),
-)
-
-// Power on the machine managed by the JetKVM at 192.168.1.100
-err := client.SetPowerState("on")
-```
-
-## How It Works
-
-1. **Request arrives** at the management API with an `X-Device` header identifying the target JetKVM device
-2. **Connection pooling** checks for an existing WebRTC session to the device, or establishes a new one:
-   - Authenticates with the JetKVM device via HTTP (`POST /auth/login-local`)
-   - Connects to the WebSocket signaling endpoint (`/webrtc/signaling/client`)
-   - Exchanges WebRTC SDP offer/answer to establish a peer connection
-   - Opens a data channel for JSON-RPC communication
-3. **JSON-RPC command** is sent over the WebRTC data channel to the JetKVM device
-4. **Response** is received on the data channel and returned to the caller
 
 ## Development
 
-### Running Tests
+### Build
 
 ```bash
-go test ./...
+go build -o nana ./cmd/nana
 ```
 
-### Building
+### Cross-Compile
 
 ```bash
-go build -o jetkvm-api ./cmd/nana
+make cross-compile    # Builds linux/amd64 and linux/arm64
 ```
 
-### Cross-Compiling
+### Test
 
 ```bash
-make cross-compile
+make test             # Tests with race detector + coverage
+go test ./...         # Quick test run
+```
+
+### Lint
+
+```bash
+make lint             # golangci-lint
+```
+
+### Docker
+
+```bash
+docker build -t nana .
+docker run -v $(pwd)/config.yaml:/config.yaml nana --config=/config.yaml
 ```
 
 ## References
 
-- [JetKVM upstream firmware](https://github.com/jetkvm/kvm) - The KVM device firmware with JSON-RPC handler definitions
-- [bmclib](https://github.com/bmc-toolbox/bmclib) - BMC library with RPC provider support
-- [Tinkerbell](https://tinkerbell.org/) - Bare metal provisioning engine
+- [JetKVM firmware](https://github.com/jetkvm/kvm) — Device firmware with JSON-RPC handler definitions
+- [bmclib](https://github.com/bmc-toolbox/bmclib) — BMC library with RPC provider support
+- [Tinkerbell](https://tinkerbell.org/) — Bare metal provisioning engine
+- [DMTF Redfish](https://www.dmtf.org/standards/redfish) — Redfish API specification
+- [go-unifi](https://github.com/ubiquiti-community/go-unifi) — UniFi controller API client
 
 ## License
 
