@@ -1,0 +1,49 @@
+# Terraform Provider release workflow.
+name: Release
+
+# This GitHub action creates a release when a tag that matches the pattern
+# "v*" (e.g. v0.1.0) is created.
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+
+# Releases need permissions to read and write the repository contents.
+# GitHub considers creating releases and uploading assets as writing contents.
+permissions:
+  contents: write
+  id-token: write # Required for ko to push images to ghcr.io
+  pull-requests: write # Required for goreleaser to create a PR with the changelog.
+  issues: write # Required for goreleaser to create an issue with the changelog.
+  packages: write # Required for goreleaser to push images to ghcr.io.
+
+jobs:
+  goreleaser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+        with:
+          # Allow goreleaser to access older tag information.
+          fetch-depth: 0
+      - uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00 # v6.0.0
+        with:
+          go-version-file: "go.mod"
+          cache: true
+      - uses: ko-build/setup-ko@d006021bd0c28d1ce33a07e7943d48b079944c8d # v0.9
+        env:
+          KO_DEFAULTBASEIMAGE: docker.io/chainguard/static
+          KO_DOCKER_REPO: ghcr.io/${{github.repository}}
+      - name: Run ko build
+        if: ${{ ! startsWith(github.ref, 'refs/tags/') }}
+        run: |-
+          ko login ghcr.io -u ${{ github.actor }} --password ${{ secrets.GITHUB_TOKEN }}
+          ko build ./cmd/bmc --platform=all --bare --push
+      - name: Run GoReleaser
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+        uses: goreleaser/goreleaser-action@7ec5c2b0c6cdda6e8bbb49444bc797dd33d74dd8 # v5.0.0
+        with:
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
