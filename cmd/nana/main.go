@@ -184,6 +184,9 @@ func buildDevices(cfg *config.Config, dm *providers.DeviceManager, logger *slog.
 	for i, devCfg := range cfg.Devices {
 		var p []providers.Provider
 		for j, prvCfg := range devCfg.Providers {
+			if defaults, ok := cfg.DefaultProvider(prvCfg.Type); ok {
+				prvCfg = prvCfg.WithDefaults(defaults)
+			}
 			prvMap := prvCfg.ToMap()
 			prvMap["mac"] = devCfg.MAC
 

@@ -33,6 +33,10 @@ type Config struct {
 	MemlimitEnable bool    `mapstructure:"memlimit_enable" yaml:"memlimit_enable"`
 	MemlimitRatio  float64 `mapstructure:"memlimit_ratio"  yaml:"memlimit_ratio"`
 
+	// Global provider defaults. Each entry defines default field values
+	// for a provider type. Device-level provider config overrides these.
+	Providers []ProviderConfig `mapstructure:"providers" yaml:"providers"`
+
 	// Managed devices.
 	Devices []DeviceConfig `mapstructure:"devices" yaml:"devices"`
 }
@@ -87,6 +91,27 @@ type ProviderConfig struct {
 	Boot []BootDeviceConfig `mapstructure:"boot" yaml:"boot"`
 }
 
+// WithDefaults returns a copy of the ProviderConfig with empty fields
+// populated from the given defaults. Device-level values take precedence.
+func (p ProviderConfig) WithDefaults(defaults ProviderConfig) ProviderConfig {
+	if p.Host == "" {
+		p.Host = defaults.Host
+	}
+	if p.Password == "" {
+		p.Password = defaults.Password
+	}
+	if p.APIKey == "" {
+		p.APIKey = defaults.APIKey
+	}
+	if p.Site == "" {
+		p.Site = defaults.Site
+	}
+	if len(p.Boot) == 0 {
+		p.Boot = defaults.Boot
+	}
+	return p
+}
+
 // ToMap converts the ProviderConfig into a map[string]any suitable for the
 // providers.Factory interface.
 func (p *ProviderConfig) ToMap() map[string]any {
@@ -135,6 +160,17 @@ func toAnySlice(ss []string) []any {
 	return out
 }
 
+// DefaultProvider returns the global default ProviderConfig for the given
+// provider type, if one exists.
+func (c *Config) DefaultProvider(providerType string) (ProviderConfig, bool) {
+	for _, p := range c.Providers {
+		if p.Type == providerType {
+			return p, true
+		}
+	}
+	return ProviderConfig{}, false
+}
+
 var (
 	cfgFile string
 	cfgMu   sync.RWMutex
@@ -149,10 +185,10 @@ func InitConfig() {
 		viper.AddConfigPath("$HOME")
 		viper.AddConfigPath(".")
 		viper.SetConfigType("yaml")
-		viper.SetConfigName("jetkvm-api")
+		viper.SetConfigName("config")
 	}
 
-	viper.SetEnvPrefix("JETKVM_API")
+	viper.SetEnvPrefix("NANA")
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_", "-", "_"))
 	viper.AutomaticEnv()
 
@@ -173,7 +209,7 @@ func InitConfig() {
 // InitFlags binds CLI flags to Viper configuration keys.
 func InitFlags(cmd *cobra.Command) {
 	cmd.PersistentFlags().
-		StringVar(&cfgFile, "config", "", "Config file path (default: ./jetkvm-api.yaml)")
+		StringVar(&cfgFile, "config", "", "Config file path (default: ./config.yaml)")
 	cmd.Flags().Int("port", 5000, "HTTP server port")
 	cmd.Flags().String("address", "0.0.0.0", "HTTP server bind address")
 	cmd.Flags().String("log-level", "info", "Log level (debug, info, warn, error)")
@@ -247,6 +283,11 @@ func validateConfig(config *Config) error {
 	}
 	if config.WebRTCTimeout < 1 {
 		return fmt.Errorf("webrtc_timeout must be a positive integer")
+	}
+	for i, prv := range config.Providers {
+		if prv.Type == "" {
+			return fmt.Errorf("providers[%d]: provider type is required", i)
+		}
 	}
 	for i, dev := range config.Devices {
 		if dev.MAC == "" {

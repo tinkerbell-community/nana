@@ -505,6 +505,39 @@ Configuration via YAML file, environment variables (`JETKVM_API_` prefix), or CL
 | `memlimit_enable` | — | `JETKVM_API_MEMLIMIT_ENABLE` | `true` | Auto-set GOMEMLIMIT |
 | `memlimit_ratio` | — | `JETKVM_API_MEMLIMIT_RATIO` | `0.9` | Memory limit ratio |
 
+### Global Provider Defaults
+
+The top-level `providers` list defines default configuration values for each provider type. When a device references a provider, any fields left empty on the device-level provider will be populated from the matching global default (matched by `type`). Device-level values always take precedence.
+
+This reduces repetition when many devices share the same provider settings (e.g., the same UniFi API key or JetKVM password).
+
+```yaml
+# Global defaults — applied to all devices using these provider types
+providers:
+  - type: "jetkvm"
+    password: "shared-password"
+  - type: "unifi"
+    api_key: "your-api-key"
+    site: "default"
+
+devices:
+  - name: "server-01"
+    mac: "AA:BB:CC:DD:EE:FF"
+    providers:
+      - type: "jetkvm"
+        host: "192.168.1.100"
+        # password inherited from global: "shared-password"
+
+  - name: "server-02"
+    mac: "11:22:33:44:55:66"
+    providers:
+      - type: "jetkvm"
+        host: "192.168.1.101"
+        password: "override"    # overrides global default
+      - type: "unifi"
+        # api_key and site inherited from global defaults
+```
+
 ### Device Configuration
 
 ```yaml

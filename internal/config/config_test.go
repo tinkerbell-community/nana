@@ -215,3 +215,154 @@ func containsSubstring(str, substr string) bool {
 	}
 	return false
 }
+
+func TestProviderConfigWithDefaults(t *testing.T) {
+	tests := []struct {
+		name     string
+		device   ProviderConfig
+		defaults ProviderConfig
+		expected ProviderConfig
+	}{
+		{
+			name:     "empty device inherits all defaults",
+			device:   ProviderConfig{Type: "jetkvm"},
+			defaults: ProviderConfig{Type: "jetkvm", Host: "10.0.0.1", Password: "secret", APIKey: "key1", Site: "site1"},
+			expected: ProviderConfig{Type: "jetkvm", Host: "10.0.0.1", Password: "secret", APIKey: "key1", Site: "site1"},
+		},
+		{
+			name:     "device values override defaults",
+			device:   ProviderConfig{Type: "jetkvm", Host: "192.168.1.1", Password: "mypass"},
+			defaults: ProviderConfig{Type: "jetkvm", Host: "10.0.0.1", Password: "secret", Site: "default"},
+			expected: ProviderConfig{Type: "jetkvm", Host: "192.168.1.1", Password: "mypass", Site: "default"},
+		},
+		{
+			name:     "device boot overrides default boot",
+			device:   ProviderConfig{Type: "jetkvm", Boot: []BootDeviceConfig{{Device: "pxe"}}},
+			defaults: ProviderConfig{Type: "jetkvm", Boot: []BootDeviceConfig{{Device: "disk"}}},
+			expected: ProviderConfig{Type: "jetkvm", Boot: []BootDeviceConfig{{Device: "pxe"}}},
+		},
+		{
+			name:     "empty device boot inherits default boot",
+			device:   ProviderConfig{Type: "jetkvm"},
+			defaults: ProviderConfig{Type: "jetkvm", Boot: []BootDeviceConfig{{Device: "pxe"}}},
+			expected: ProviderConfig{Type: "jetkvm", Boot: []BootDeviceConfig{{Device: "pxe"}}},
+		},
+		{
+			name:     "no defaults changes nothing",
+			device:   ProviderConfig{Type: "unifi", APIKey: "abc"},
+			defaults: ProviderConfig{Type: "unifi"},
+			expected: ProviderConfig{Type: "unifi", APIKey: "abc"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.device.WithDefaults(tt.defaults)
+			if result.Host != tt.expected.Host {
+				t.Errorf("Host: got %q, want %q", result.Host, tt.expected.Host)
+			}
+			if result.Password != tt.expected.Password {
+				t.Errorf("Password: got %q, want %q", result.Password, tt.expected.Password)
+			}
+			if result.APIKey != tt.expected.APIKey {
+				t.Errorf("APIKey: got %q, want %q", result.APIKey, tt.expected.APIKey)
+			}
+			if result.Site != tt.expected.Site {
+				t.Errorf("Site: got %q, want %q", result.Site, tt.expected.Site)
+			}
+			if len(result.Boot) != len(tt.expected.Boot) {
+				t.Errorf("Boot length: got %d, want %d", len(result.Boot), len(tt.expected.Boot))
+			}
+		})
+	}
+}
+
+func TestConfigDefaultProvider(t *testing.T) {
+	cfg := &Config{
+		Port:          5000,
+		WebRTCTimeout: 30,
+		Providers: []ProviderConfig{
+			{Type: "jetkvm", Host: "10.0.0.1", Password: "default-pass"},
+			{Type: "unifi", APIKey: "global-key", Site: "default"},
+		},
+	}
+
+	t.Run("found jetkvm", func(t *testing.T) {
+		p, ok := cfg.DefaultProvider("jetkvm")
+		if !ok {
+			t.Fatal("expected to find jetkvm defaults")
+		}
+		if p.Host != "10.0.0.1" {
+			t.Errorf("Host: got %q, want %q", p.Host, "10.0.0.1")
+		}
+		if p.Password != "default-pass" {
+			t.Errorf("Password: got %q, want %q", p.Password, "default-pass")
+		}
+	})
+
+	t.Run("found unifi", func(t *testing.T) {
+		p, ok := cfg.DefaultProvider("unifi")
+		if !ok {
+			t.Fatal("expected to find unifi defaults")
+		}
+		if p.APIKey != "global-key" {
+			t.Errorf("APIKey: got %q, want %q", p.APIKey, "global-key")
+		}
+	})
+
+	t.Run("not found", func(t *testing.T) {
+		_, ok := cfg.DefaultProvider("nonexistent")
+		if ok {
+			t.Error("expected not to find nonexistent provider")
+		}
+	})
+}
+
+func TestValidateConfigGlobalProviders(t *testing.T) {
+	tests := []struct {
+		name        string
+		config      *Config
+		expectError bool
+		errorMsg    string
+	}{
+		{
+			name: "valid global providers",
+			config: &Config{
+				Port:          5000,
+				WebRTCTimeout: 30,
+				Providers: []ProviderConfig{
+					{Type: "jetkvm", Host: "10.0.0.1"},
+				},
+			},
+			expectError: false,
+		},
+		{
+			name: "global provider missing type",
+			config: &Config{
+				Port:          5000,
+				WebRTCTimeout: 30,
+				Providers: []ProviderConfig{
+					{Host: "10.0.0.1"},
+				},
+			},
+			expectError: true,
+			errorMsg:    "providers[0]: provider type is required",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateConfig(tt.config)
+			if tt.expectError && err == nil {
+				t.Error("expected error but got none")
+			}
+			if !tt.expectError && err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+			if tt.expectError && tt.errorMsg != "" && err != nil &&
+				!contains(err.Error(), tt.errorMsg) {
+				t.Errorf("expected error containing %q, got %q", tt.errorMsg, err.Error())
+			}
+		})
+	}
+}
