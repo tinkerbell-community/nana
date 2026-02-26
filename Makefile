@@ -28,13 +28,13 @@ mod: ## go mod tidy
 .PHONY: build
 build: ## go build
 	$(call print-target)
-	CGO_ENABLED=0 go build -o dist/jetkvm-api ./cmd/nana
+	CGO_ENABLED=0 go build -o dist/nana ./cmd/nana
 
 .PHONY: cross-compile
 cross-compile: ## build for linux amd64 and arm64
 	$(call print-target)
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/jetkvm-api-linux-amd64 ./cmd/nana
-	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o dist/jetkvm-api-linux-arm64 ./cmd/nana
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o dist/nana-linux-amd64 ./cmd/nana
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o dist/nana-linux-arm64 ./cmd/nana
 
 .PHONY: lint
 lint: ## golangci-lint

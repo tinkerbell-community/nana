@@ -227,7 +227,7 @@ func buildDevices(cfg *config.Config, dm *providers.DeviceManager, logger *slog.
 }
 
 var rootCmd = &cobra.Command{
-	Use:   "jetkvm-api",
+	Use:   "nana",
 	Short: "JetKVM Management API - BMC-compatible Redfish and RPC server",
 	Long: `JetKVM Management API provides BMC-compatible Redfish and RPC endpoints
 for managing devices through pluggable providers.
@@ -249,7 +249,7 @@ Device Identification:
   Redfish: System/Manager ID in URL path (name or MAC)
 
 Example:
-  jetkvm-api --config=config.yaml`,
+  nana --config=config.yaml`,
 	Run: func(cmd *cobra.Command, args []string) {
 		cfg, err := config.LoadConfig()
 		if err != nil {

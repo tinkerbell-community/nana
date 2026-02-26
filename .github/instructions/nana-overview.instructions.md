@@ -12,7 +12,7 @@ applyTo: "**"
 - **Module:** `github.com/tinkerbell-community/nana`
 - **Language:** Go 1.24+
 - **Binary entrypoint:** `cmd/nana/main.go`
-- **Binary name:** `nana` (historically `jetkvm-api`)
+- **Binary name:** `nana`
 
 ## Two Core Functions
 
@@ -140,7 +140,7 @@ The `cfg` map is built in `cmd/nana/main.go:buildDevices()` from the YAML provid
 
 - Viper for config file + env var merging; Cobra for CLI flags.
 - Env prefix: `JETKVM_API_`
-- Config file: YAML format, searched at `./jetkvm-api.yaml` and `$HOME/jetkvm-api.yaml`
+- Config file: YAML format, searched at `./nana.yaml` and `$HOME/nana.yaml`
 - Device config is a list of `DeviceConfig` structs, each with MAC (required), name (optional), and providers list.
 - Validation is explicit in `validateConfig()` — check port range, non-empty MAC, provider type present.
 
@@ -195,7 +195,7 @@ go test -run TestName ./internal/api/   # Specific test
 
 | Target | Command |
 |---|---|
-| Build | `make build` → `dist/jetkvm-api` |
+| Build | `make build` → `dist/nana` |
 | Cross-compile | `make cross-compile` → linux/amd64 + linux/arm64 |
 | Test | `make test` → race + coverage |
 | Lint | `make lint` → golangci-lint |

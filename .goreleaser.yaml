@@ -1,5 +1,5 @@
 version: 2
-project_name: jetkvm-api
+project_name: nana
 env:
   - REPO={{.GitURL | trimprefix "https://github.com/" | trimsuffix ".git"}}
 before:
@@ -8,7 +8,7 @@ before:
 builds:
   - env: ["CGO_ENABLED=0"]
     main: ./cmd/nana
-    binary: jetkvm-api
+    binary: nana
     goos: [linux]
     goarch: [amd64, arm64]
 kos:
