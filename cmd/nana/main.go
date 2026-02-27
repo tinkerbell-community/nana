@@ -236,7 +236,7 @@ Configuration is provided via a YAML config file that defines managed devices,
 each with a MAC address, optional name, and one or more providers.
 
 Endpoints:
-  POST /rpc                           - bmclib-compatible JSON-RPC
+  POST /                              - bmclib-compatible JSON-RPC
   GET  /redfish/v1/                   - Redfish Service Root
   GET  /redfish/v1/Systems            - Computer System Collection
   GET  /redfish/v1/Systems/{id}       - Computer System
@@ -318,7 +318,7 @@ Example:
 		mux := http.NewServeMux()
 
 		// RPC endpoint (bmclib-compatible).
-		mux.HandleFunc("POST /rpc", state.RpcHandler)
+		mux.HandleFunc("POST /", state.RpcHandler)
 
 		// Redfish endpoints (delegates to current service via ServerState).
 		api.RegisterRedfishRoutes(mux, state)
@@ -336,7 +336,9 @@ Example:
 		fmt.Printf("Registered %d device(s)\n", len(cfg.Devices))
 		fmt.Printf("Available providers: %v\n", providers.Available())
 		fmt.Printf("Endpoints:\n")
-		fmt.Printf("  POST /rpc                  - bmclib-compatible JSON-RPC\n")
+		fmt.Printf(
+			"  POST /											- bmclib-compatible JSON-RPC\n",
+		)
 		fmt.Printf("  GET  /redfish/v1/           - Redfish Service Root\n")
 		fmt.Printf("  GET  /redfish/v1/Systems    - Computer System Collection\n")
 		fmt.Printf("  GET  /healthz               - Health check\n")

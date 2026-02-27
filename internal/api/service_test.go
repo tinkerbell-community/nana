@@ -109,7 +109,7 @@ func doRPC(
 ) *httptest.ResponseRecorder {
 	t.Helper()
 	body, _ := json.Marshal(payload)
-	req := httptest.NewRequest("POST", "/rpc", bytes.NewReader(body))
+	req := httptest.NewRequest("POST", "/", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	if device != "" {
 		req.Header.Set("X-Device", device)
@@ -141,7 +141,7 @@ func TestRpcHandler_Ping(t *testing.T) {
 func TestRpcHandler_InvalidJSON(t *testing.T) {
 	svc, _ := newTestRPCService()
 
-	req := httptest.NewRequest("POST", "/rpc", bytes.NewReader([]byte("invalid json")))
+	req := httptest.NewRequest("POST", "/", bytes.NewReader([]byte("invalid json")))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	svc.RpcHandler(w, req)
@@ -279,7 +279,7 @@ func TestRpcHandler_FallbackToHostField(t *testing.T) {
 	}
 
 	body, _ := json.Marshal(payload)
-	req := httptest.NewRequest("POST", "/rpc", bytes.NewReader(body))
+	req := httptest.NewRequest("POST", "/", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	svc.RpcHandler(w, req)

@@ -19,7 +19,7 @@ graph TB
     end
 
     subgraph "Nana Service"
-        RPC[JSON-RPC Endpoint<br/><code>POST /rpc</code>]
+        RPC[JSON-RPC Endpoint<br/><code>POST </code>]
         RED[Redfish v1 API<br/><code>/redfish/v1/*</code>]
         DM[Device Manager]
         PR[Provider Registry]
@@ -291,7 +291,7 @@ providers:
 
 ## API Reference
 
-### JSON-RPC Endpoint (`POST /rpc`)
+### JSON-RPC Endpoint (`POST /`)
 
 bmclib-compatible JSON-RPC interface. Device identified by `X-Device` header (name or MAC) or `host` field in JSON body.
 
@@ -346,7 +346,7 @@ DMTF Redfish-compliant REST API with OData annotations.
 flowchart TD
     REQ([Incoming Request]) --> EP{Endpoint?}
 
-    EP --> |POST /rpc| RPC[JSON-RPC Handler]
+    EP --> |POST /| RPC[JSON-RPC Handler]
     EP --> |/redfish/v1/*| REDFISH[Redfish Handler]
 
     RPC --> PARSE[Parse JSON-RPC Body]
@@ -661,26 +661,26 @@ err := client.SetPowerState("on")
 
 ```bash
 # Health check (no device needed)
-curl -s -X POST http://localhost:5000/rpc \
+curl -s -X POST http://localhost:5000 \
   -H "Content-Type: application/json" \
   -d '{"method": "ping", "id": 1}'
 # → {"id":1,"result":"pong"}
 
 # Get power state via RPC
-curl -s -X POST http://localhost:5000/rpc \
+curl -s -X POST http://localhost:5000 \
   -H "X-Device: server-01" \
   -H "Content-Type: application/json" \
   -d '{"method": "getPowerState", "id": 1}'
 # → {"id":1,"result":"on"}
 
 # Power cycle via RPC
-curl -s -X POST http://localhost:5000/rpc \
+curl -s -X POST http://localhost:5000 \
   -H "X-Device: server-01" \
   -H "Content-Type: application/json" \
   -d '{"method": "setPowerState", "params": {"state": "cycle"}, "id": 2}'
 
 # Mount ISO via RPC
-curl -s -X POST http://localhost:5000/rpc \
+curl -s -X POST http://localhost:5000 \
   -H "X-Device: server-01" \
   -H "Content-Type: application/json" \
   -d '{"method": "setVirtualMedia", "params": {"mediaUrl": "http://example.com/boot.iso", "kind": "cdrom"}, "id": 3}'
