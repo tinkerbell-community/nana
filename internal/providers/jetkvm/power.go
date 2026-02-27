@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"time"
+
+	"github.com/tinkerbell-community/nana/internal/providers/jetkvm/client"
 )
 
 // postPowerOnTimeout is the maximum time allowed for post-power-on tasks
@@ -68,6 +70,14 @@ func (p *Provider) postPowerOnTasks(state string, hasQueued bool) {
 	}
 
 	if state == "on" {
+		// Wait for the power extension to confirm the device is powered on
+		// before sending WoL packets — the NIC needs power to receive them.
+		if err := p.c.WaitForPowerState(ctx, client.PowerOn); err != nil {
+			p.logger.Warn("failed waiting for power state before WoL",
+				slog.String("host", p.host),
+				slog.String("error", err.Error()),
+			)
+		}
 		if err := p.sendWakeOnLan(ctx); err != nil {
 			p.logger.Warn("wake-on-LAN failed",
 				slog.String("host", p.host),

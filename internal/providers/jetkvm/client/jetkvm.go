@@ -793,7 +793,7 @@ func (c *Client) SetPowerState(ctx context.Context, state string) error {
 		return err
 	}
 
-	return c.waitForPowerState(ctx, desiredPowerState(state))
+	return c.WaitForPowerState(ctx, desiredPowerState(state))
 }
 
 // SendPowerAction sends the power command without waiting for the state to
@@ -815,9 +815,9 @@ func (c *Client) SendPowerAction(ctx context.Context, state string) error {
 	}
 }
 
-// waitForPowerState polls GetPowerState until it matches the desired state
+// WaitForPowerState polls GetPowerState until it matches the desired state
 // or the context is cancelled.
-func (c *Client) waitForPowerState(ctx context.Context, desired PowerState) error {
+func (c *Client) WaitForPowerState(ctx context.Context, desired PowerState) error {
 	if desired == PowerUnknown {
 		return nil
 	}
