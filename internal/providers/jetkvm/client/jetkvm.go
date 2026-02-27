@@ -314,6 +314,7 @@ func (c *Client) Connect(ctx context.Context) error {
 		oldPC := c.pc
 		c.pc = nil
 		c.mu.Unlock()
+		c.failPendingRequests("data channel closed")
 		if oldPC != nil {
 			_ = oldPC.Close()
 		}
@@ -518,6 +519,7 @@ func (c *Client) Close() error {
 
 // Reconnect forces a close and re-establishes the WebRTC connection.
 func (c *Client) Reconnect(ctx context.Context) error {
+	c.failPendingRequests("reconnecting")
 	_ = c.Close()
 	return c.Connect(ctx)
 }
@@ -583,6 +585,23 @@ func (c *Client) Call(
 		return resp, nil
 	case <-ctx.Done():
 		return nil, fmt.Errorf("RPC call timed out: %w", ctx.Err())
+	}
+}
+
+// failPendingRequests sends error responses to all pending RPC calls.
+// This is called when the data channel closes unexpectedly so callers
+// don't hang until their context times out.
+func (c *Client) failPendingRequests(reason string) {
+	c.pendingMu.Lock()
+	pending := c.pending
+	c.pending = make(map[int64]chan *JSONRPCResponse)
+	c.pendingMu.Unlock()
+
+	for _, ch := range pending {
+		ch <- &JSONRPCResponse{
+			JSONRPC: "2.0",
+			Error:   reason,
+		}
 	}
 }
 
@@ -770,6 +789,17 @@ func desiredPowerState(action string) PowerState {
 // SetPowerState sets the power state based on the active extension and waits
 // for the state to transition to the desired value.
 func (c *Client) SetPowerState(ctx context.Context, state string) error {
+	if err := c.SendPowerAction(ctx, state); err != nil {
+		return err
+	}
+
+	return c.waitForPowerState(ctx, desiredPowerState(state))
+}
+
+// SendPowerAction sends the power command without waiting for the state to
+// transition. Use this when the caller manages its own confirmation logic
+// or needs a fast, non-blocking power action.
+func (c *Client) SendPowerAction(ctx context.Context, state string) error {
 	ext, err := c.GetActiveExtension(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get active extension: %w", err)
@@ -777,18 +807,12 @@ func (c *Client) SetPowerState(ctx context.Context, state string) error {
 
 	switch ext {
 	case "atx-power":
-		if err := c.setATXPowerState(ctx, state); err != nil {
-			return err
-		}
+		return c.setATXPowerState(ctx, state)
 	case "dc-power":
-		if err := c.setDCPowerState(ctx, state); err != nil {
-			return err
-		}
+		return c.setDCPowerState(ctx, state)
 	default:
 		return fmt.Errorf("no supported power extension active: %q", ext)
 	}
-
-	return c.waitForPowerState(ctx, desiredPowerState(state))
 }
 
 // waitForPowerState polls GetPowerState until it matches the desired state

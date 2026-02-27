@@ -8,6 +8,10 @@ import (
 	"time"
 )
 
+// postPowerOnTimeout is the maximum time allowed for post-power-on tasks
+// (WoL, device-ready wait, boot macros) that run in the background.
+const postPowerOnTimeout = 5 * time.Minute
+
 // GetPowerState returns the current power state of the JetKVM-managed device.
 func (p *Provider) GetPowerState(ctx context.Context) (string, error) {
 	if err := p.ensureConnected(ctx); err != nil {
@@ -21,16 +25,49 @@ func (p *Provider) GetPowerState(ctx context.Context) (string, error) {
 }
 
 // SetPowerState sets the power state. Valid values: "on", "off", "cycle", "reset".
+// The power command is sent synchronously. Post-power-on tasks (WoL, device-ready
+// wait, boot macros) run in a background goroutine with a separate timeout so they
+// don't block the caller's context.
 func (p *Provider) SetPowerState(ctx context.Context, state string) error {
 	if err := p.ensureConnected(ctx); err != nil {
 		return fmt.Errorf("failed to connect to JetKVM: %w", err)
 	}
-	if err := p.c.SetPowerState(ctx, state); err != nil {
+
+	// Send the power command using the caller's context (fast operation).
+	if err := p.c.SendPowerAction(ctx, state); err != nil {
 		return err
 	}
 
-	switch state {
-	case "on":
+	// Run post-power-on tasks in the background with a dedicated timeout.
+	hasWoL := state == "on"
+	hasQueued := p.hasQueuedTasks(state)
+
+	if hasWoL || hasQueued {
+		p.bgWg.Add(1)
+		go func() {
+			defer p.bgWg.Done()
+			p.postPowerOnTasks(state, hasQueued)
+		}()
+	}
+
+	return nil
+}
+
+// postPowerOnTasks handles WoL, device-ready waiting, and boot macro execution
+// after a power state change. It runs with its own timeout context.
+func (p *Provider) postPowerOnTasks(state string, hasQueued bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), postPowerOnTimeout)
+	defer cancel()
+
+	if err := p.ensureConnected(ctx); err != nil {
+		p.logger.Warn("failed to connect for post-power-on tasks",
+			slog.String("host", p.host),
+			slog.String("error", err.Error()),
+		)
+		return
+	}
+
+	if state == "on" {
 		if err := p.sendWakeOnLan(ctx); err != nil {
 			p.logger.Warn("wake-on-LAN failed",
 				slog.String("host", p.host),
@@ -39,13 +76,10 @@ func (p *Provider) SetPowerState(ctx context.Context, state string) error {
 		}
 	}
 
-	if p.hasQueuedTasks(state) {
+	if hasQueued {
 		p.waitForDeviceReady(ctx)
+		p.drainQueue(ctx, state)
 	}
-
-	p.drainQueue(ctx, state)
-
-	return nil
 }
 
 // sendWakeOnLan retrieves configured WOL devices and sends magic packets for each.

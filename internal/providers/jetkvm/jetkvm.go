@@ -40,6 +40,8 @@ type Provider struct {
 
 	queueMu sync.Mutex
 	queue   map[string][]func(ctx context.Context) error // keyed by power state
+
+	bgWg sync.WaitGroup // tracks background post-power-on goroutines
 }
 
 func init() {
@@ -109,8 +111,9 @@ func (p *Provider) ensureConnected(ctx context.Context) error {
 	return p.c.Connect(ctx)
 }
 
-// Close releases the WebRTC connection.
+// Close releases the WebRTC connection and waits for background tasks to finish.
 func (p *Provider) Close() error {
+	p.bgWg.Wait()
 	return p.c.Close()
 }
 
