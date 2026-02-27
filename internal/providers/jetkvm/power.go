@@ -78,6 +78,20 @@ func (p *Provider) postPowerOnTasks(state string, hasQueued bool) {
 				slog.String("error", err.Error()),
 			)
 		}
+		if p.wolDelay > 0 {
+			p.logger.Info("waiting before sending WoL",
+				slog.String("host", p.host),
+				slog.Duration("delay", p.wolDelay),
+			)
+			select {
+			case <-time.After(p.wolDelay):
+			case <-ctx.Done():
+				p.logger.Warn("WoL delay interrupted",
+					slog.String("host", p.host),
+					slog.String("error", ctx.Err().Error()),
+				)
+			}
+		}
 		if err := p.sendWakeOnLan(ctx); err != nil {
 			p.logger.Warn("wake-on-LAN failed",
 				slog.String("host", p.host),

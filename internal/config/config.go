@@ -89,6 +89,10 @@ type ProviderConfig struct {
 
 	// Boot defines keyboard macro sequences for boot device selection.
 	Boot []BootDeviceConfig `mapstructure:"boot" yaml:"boot"`
+
+	// WoLDelay is the duration to wait after power-on confirmation before
+	// sending Wake-on-LAN packets. This gives the NIC time to initialize.
+	WoLDelay string `mapstructure:"wol_delay" yaml:"wol_delay"`
 }
 
 // WithDefaults returns a copy of the ProviderConfig with empty fields
@@ -108,6 +112,9 @@ func (p ProviderConfig) WithDefaults(defaults ProviderConfig) ProviderConfig {
 	}
 	if len(p.Boot) == 0 {
 		p.Boot = defaults.Boot
+	}
+	if p.WoLDelay == "" {
+		p.WoLDelay = defaults.WoLDelay
 	}
 	return p
 }
@@ -148,6 +155,9 @@ func (p *ProviderConfig) ToMap() map[string]any {
 			}
 		}
 		m["boot"] = bootList
+	}
+	if p.WoLDelay != "" {
+		m["wol_delay"] = p.WoLDelay
 	}
 	return m
 }

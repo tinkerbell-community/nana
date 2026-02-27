@@ -35,6 +35,7 @@ type Provider struct {
 	host        string
 	password    string
 	timeout     time.Duration
+	wolDelay    time.Duration
 	logger      slog.Logger
 	bootDevices map[string]*BootDeviceConfig // keyed by device name (e.g. "pxe")
 
@@ -73,11 +74,19 @@ func newProvider(cfg map[string]any) (providers.Provider, error) {
 
 	bootDevices := parseBootConfig(cfg)
 
+	var wolDelay time.Duration
+	if d, ok := cfg["wol_delay"].(string); ok && d != "" {
+		if parsed, err := time.ParseDuration(d); err == nil {
+			wolDelay = parsed
+		}
+	}
+
 	return &Provider{
 		c:           c,
 		host:        host,
 		password:    password,
 		timeout:     timeout,
+		wolDelay:    wolDelay,
 		logger:      *logger,
 		bootDevices: bootDevices,
 		queue:       make(map[string][]func(ctx context.Context) error),
