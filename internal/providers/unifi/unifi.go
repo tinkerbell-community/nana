@@ -62,16 +62,17 @@ type uplinkInfo struct {
 // Provider implements the providers.Provider and providers.PowerController
 // interfaces for devices powered via UniFi switch PoE ports.
 type Provider struct {
-	apiURL    string
-	apiKey    string
-	site      string
-	mac       string
+	apiURL string
+	apiKey string
+	site   string
+	mac    string
+	signer ssh.Signer
+
+	mu        sync.Mutex
+	client    *unifi.ApiClient
+	uplink    *uplinkInfo
 	sshConfig *ssh.ClientConfig
 	sshPort   int
-
-	mu     sync.Mutex
-	client *unifi.ApiClient
-	uplink *uplinkInfo
 
 	logger *slog.Logger
 }
@@ -110,25 +111,16 @@ func newProvider(cfg map[string]any) (providers.Provider, error) {
 		return nil, fmt.Errorf("failed to parse generated SSH private key: %w", err)
 	}
 
-	sshConfig := &ssh.ClientConfig{
-		User: "root",
-		Auth: []ssh.AuthMethod{
-			ssh.PublicKeys(signer),
-		},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		Timeout:         30 * time.Second,
-	}
-
 	logger := slog.Default().With("provider", "unifi", "host", apiURL, "site", site, "mac", mac)
 
 	return &Provider{
-		apiURL:    apiURL,
-		apiKey:    apiKey,
-		site:      site,
-		mac:       mac,
-		sshConfig: sshConfig,
-		sshPort:   22,
-		logger:    logger,
+		apiURL:  apiURL,
+		apiKey:  apiKey,
+		site:    site,
+		mac:     mac,
+		signer:  signer,
+		sshPort: 22,
+		logger:  logger,
 	}, nil
 }
 
@@ -160,16 +152,31 @@ func (p *Provider) Open(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to create UniFi API client: %w", err)
 	}
-	p.client = client
 
 	_, publicAuthorizedKey, err := generateSSHKey(p.apiKey)
 	if err != nil {
 		return fmt.Errorf("failed to generate SSH public key: %w", err)
 	}
 
-	if err := ensureSSHKey(ctx, p.client, p.site, publicAuthorizedKey); err != nil {
+	result, err := ensureSSHKey(ctx, client, p.site, publicAuthorizedKey)
+	if err != nil {
 		return fmt.Errorf("failed to ensure SSH key on UniFi device: %w", err)
 	}
+
+	p.logger.Info("SSH key provisioned", slog.String("ssh_user", result.username))
+
+	// Only cache the client after all initialization succeeds.
+	p.mu.Lock()
+	p.client = client
+	p.sshConfig = &ssh.ClientConfig{
+		User: result.username,
+		Auth: []ssh.AuthMethod{
+			ssh.PublicKeys(p.signer),
+		},
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		Timeout:         30 * time.Second,
+	}
+	p.mu.Unlock()
 
 	return nil
 }
@@ -203,24 +210,39 @@ func (p *Provider) resolveUplink(ctx context.Context) (*uplinkInfo, error) {
 		return nil, fmt.Errorf("failed to get client info for MAC %s: %w", p.mac, err)
 	}
 
+	// If the live client info lacks usable port data (common for offline devices),
+	// try the client history endpoint which retains port info after disconnect.
+	// The API may return sw_port=0 for offline devices, so check the value too.
+	hasPort := (clientInfo.SwPort != nil && *clientInfo.SwPort > 0) ||
+		(clientInfo.LastUplinkRemotePort != nil && *clientInfo.LastUplinkRemotePort > 0)
+	if !hasPort {
+		p.logger.Info("live client info has no port data, trying history endpoint")
+		hist, histErr := p.client.ListClientHistory(ctx, p.site, 0)
+		if histErr != nil {
+			p.logger.Warn("client history lookup failed", slog.String("error", histErr.Error()))
+		} else {
+			normalizedMAC := strings.ToLower(p.mac)
+			for i := range hist {
+				if strings.ToLower(hist[i].Mac) == normalizedMAC {
+					clientInfo = &hist[i]
+					break
+				}
+			}
+		}
+	}
+
 	// Coalesce uplink MAC: prefer current, fall back to last known.
 	uplinkMAC := clientInfo.UplinkMac
 	if uplinkMAC == "" {
 		uplinkMAC = clientInfo.LastUplinkMac
 	}
 	if uplinkMAC == "" {
-		return nil, fmt.Errorf("no uplink MAC found for device %s", p.mac)
-	}
-
-	// Coalesce switch port: prefer current, fall back to last known.
-	var switchPort int
-	if clientInfo.SwPort != nil {
-		switchPort = int(*clientInfo.SwPort)
-	} else if clientInfo.LastUplinkRemotePort != nil {
-		switchPort = int(*clientInfo.LastUplinkRemotePort)
-	}
-	if switchPort == 0 {
-		return nil, fmt.Errorf("no switch port found for device %s", p.mac)
+		return nil, fmt.Errorf(
+			"no uplink MAC found for device %s (display_name=%q, status=%q)",
+			p.mac,
+			clientInfo.DisplayName,
+			clientInfo.Status,
+		)
 	}
 
 	device, err := p.client.GetDeviceByMAC(ctx, p.site, uplinkMAC)
@@ -228,12 +250,40 @@ func (p *Provider) resolveUplink(ctx context.Context) (*uplinkInfo, error) {
 		return nil, fmt.Errorf("failed to get uplink device %s: %w", uplinkMAC, err)
 	}
 
-	if device.ConfigNetwork == nil || device.ConfigNetwork.IP == "" {
-		return nil, fmt.Errorf("no IP configured for uplink device %s", uplinkMAC)
+	// Resolve the switch management IP. Prefer the runtime IP from the
+	// stat/device response (works for both DHCP and static), fall back to
+	// the configured static IP in config_network.
+	switchIP := device.IP
+	if switchIP == "" && device.ConfigNetwork != nil {
+		switchIP = device.ConfigNetwork.IP
+	}
+	if switchIP == "" {
+		return nil, fmt.Errorf("no IP found for uplink device %s", uplinkMAC)
+	}
+
+	// Determine the switch port. First try the client info fields from the
+	// v2 API, then fall back to searching the switch's own port table for a
+	// port whose last-connected MAC matches the device.
+	var switchPort int
+	if clientInfo.SwPort != nil && *clientInfo.SwPort > 0 {
+		switchPort = int(*clientInfo.SwPort)
+	} else if clientInfo.LastUplinkRemotePort != nil && *clientInfo.LastUplinkRemotePort > 0 {
+		switchPort = int(*clientInfo.LastUplinkRemotePort)
+	} else {
+		switchPort = findPortByMAC(device.PortTable, p.mac)
+	}
+	if switchPort == 0 {
+		return nil, fmt.Errorf(
+			"no switch port found for device %s (display_name=%q, status=%q, uplink_mac=%q)",
+			p.mac,
+			clientInfo.DisplayName,
+			clientInfo.Status,
+			uplinkMAC,
+		)
 	}
 
 	info := &uplinkInfo{
-		switchIP: device.ConfigNetwork.IP,
+		switchIP: switchIP,
 		port:     switchPort,
 	}
 
@@ -242,6 +292,18 @@ func (p *Provider) resolveUplink(ctx context.Context) (*uplinkInfo, error) {
 	p.mu.Unlock()
 
 	return info, nil
+}
+
+// findPortByMAC searches a switch's port table for a port whose last-connected
+// client MAC matches the given MAC address. Returns 0 if no match is found.
+func findPortByMAC(portTable []unifi.DevicePortTable, mac string) int {
+	normalized := strings.ToLower(strings.ReplaceAll(mac, "-", ":"))
+	for _, pt := range portTable {
+		if strings.EqualFold(pt.LastConnection.MAC, normalized) && pt.PortIdx > 0 {
+			return int(pt.PortIdx)
+		}
+	}
+	return 0
 }
 
 // invalidateUplink clears the cached uplink information.

@@ -95,28 +95,56 @@ func generateSSHKey(apiKey string) ([]byte, []byte, error) {
 
 // ensureSSHKey uses the UniFi API to ensure the generated SSH public key is
 // present in the device's mgmt settings.
+// ensureSSHKeyResult holds the SSH username along with any error from provisioning.
+type ensureSSHKeyResult struct {
+	username string
+}
+
 func ensureSSHKey(
 	ctx context.Context,
 	client *unifi.ApiClient,
 	site string,
 	publicAuthorizedKey []byte,
-) error {
+) (*ensureSSHKeyResult, error) {
 	_, mgmt, err := unifi.GetSetting[*settings.Mgmt](client, ctx, site)
 	if err != nil {
-		return fmt.Errorf("failed to get mgmt settings: %w", err)
+		return nil, fmt.Errorf("failed to get mgmt settings: %w", err)
+	}
+
+	// Use the SSH username from the controller's management settings.
+	// UniFi switches authenticate with this username, not necessarily "root".
+	username := mgmt.SSHUsername
+	if username == "" {
+		username = "root"
 	}
 
 	pubKeyStr := strings.TrimSpace(string(publicAuthorizedKey))
 
-	// Check if the key already exists.
+	// The UniFi controller stores the key type separately and reconstructs
+	// the authorized_keys line as "{type} {key}" when provisioning to
+	// switches. Strip the algorithm prefix so it doesn't get doubled.
+	if parts := strings.SplitN(pubKeyStr, " ", 3); len(parts) >= 2 {
+		pubKeyStr = parts[1] // just the base64-encoded key material
+	}
+
+	// Check if the key already exists (correctly formatted).
 	for _, existing := range mgmt.SSHKeys {
 		if strings.TrimSpace(existing.Key) == pubKeyStr {
-			return nil // already present
+			return &ensureSSHKeyResult{username: username}, nil
+		}
+	}
+
+	// Remove any previously provisioned keys with our name that may have the
+	// wrong format (e.g. full authorized_keys line instead of base64 only).
+	cleaned := mgmt.SSHKeys[:0]
+	for _, k := range mgmt.SSHKeys {
+		if k.Name != "mgmt-api" {
+			cleaned = append(cleaned, k)
 		}
 	}
 
 	mgmt.SSHEnabled = true
-	mgmt.SSHKeys = append(mgmt.SSHKeys, settings.SettingMgmtSSHKeys{
+	mgmt.SSHKeys = append(cleaned, settings.SettingMgmtSSHKeys{
 		Name:    "mgmt-api",
 		Key:     pubKeyStr,
 		KeyType: ssh.KeyAlgoED25519,
@@ -124,8 +152,8 @@ func ensureSSHKey(
 	})
 
 	if err := client.UpdateSetting(ctx, site, mgmt); err != nil {
-		return fmt.Errorf("failed to update mgmt settings: %w", err)
+		return nil, fmt.Errorf("failed to update mgmt settings: %w", err)
 	}
 
-	return nil
+	return &ensureSSHKeyResult{username: username}, nil
 }

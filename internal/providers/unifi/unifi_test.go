@@ -1,6 +1,10 @@
 package unifi
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/ubiquiti-community/go-unifi/unifi"
+)
 
 func TestParsePoEStatus(t *testing.T) {
 	output := `Total Power Limit(mW): 150000
@@ -45,5 +49,39 @@ Total number of entries: 2
 	}
 	if ml.entries[1].port != 5 {
 		t.Errorf("expected port 5, got %d", ml.entries[1].port)
+	}
+}
+
+func TestFindPortByMAC(t *testing.T) {
+	portTable := []unifi.DevicePortTable{
+		{PortIdx: 1, LastConnection: unifi.DeviceLastConnection{MAC: "aa:bb:cc:dd:ee:ff"}},
+		{PortIdx: 5, LastConnection: unifi.DeviceLastConnection{MAC: "2c:cf:67:0a:a3:33"}},
+		{PortIdx: 8, LastConnection: unifi.DeviceLastConnection{MAC: ""}},
+	}
+
+	tests := []struct {
+		name string
+		mac  string
+		want int
+	}{
+		{"exact match", "2c:cf:67:0a:a3:33", 5},
+		{"case insensitive", "2C:CF:67:0A:A3:33", 5},
+		{"dash format", "2c-cf-67-0a-a3-33", 5},
+		{"other device", "aa:bb:cc:dd:ee:ff", 1},
+		{"no match", "11:22:33:44:55:66", 0},
+		{"empty table", "2c:cf:67:0a:a3:33", 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			table := portTable
+			if tt.name == "empty table" {
+				table = nil
+			}
+			got := findPortByMAC(table, tt.mac)
+			if got != tt.want {
+				t.Errorf("findPortByMAC() = %d, want %d", got, tt.want)
+			}
+		})
 	}
 }
