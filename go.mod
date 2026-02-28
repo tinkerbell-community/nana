@@ -9,7 +9,7 @@ require (
 	github.com/pion/webrtc/v4 v4.2.1
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.19.0
-	github.com/ubiquiti-community/go-unifi v1.33.36
+	github.com/ubiquiti-community/go-unifi v1.33.38
 	go.uber.org/automaxprocs v1.6.0
 	golang.org/x/crypto v0.47.0
 )
