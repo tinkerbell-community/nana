@@ -2,17 +2,18 @@ package jetkvm
 
 import (
 	"context"
-	"errors"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"net"
+	"regexp"
+	"strings"
 	"time"
-
-	"github.com/tinkerbell-community/nana/internal/providers/jetkvm/client"
 )
 
-// postPowerOnTimeout is the maximum time allowed for post-power-on tasks
-// (WoL, device-ready wait, boot macros) that run in the background.
-const postPowerOnTimeout = 5 * time.Minute
+// bootMacroTimeout is the maximum time allowed for background boot macro tasks
+// (device-ready wait, keyboard macros) that run after power-on + WoL complete.
+const bootMacroTimeout = 5 * time.Minute
 
 // GetPowerState returns the current power state of the JetKVM-managed device.
 func (p *Provider) GetPowerState(ctx context.Context) (string, error) {
@@ -27,9 +28,10 @@ func (p *Provider) GetPowerState(ctx context.Context) (string, error) {
 }
 
 // SetPowerState sets the power state. Valid values: "on", "off", "cycle", "reset".
-// The power command is sent synchronously. Post-power-on tasks (WoL, device-ready
-// wait, boot macros) run in a background goroutine with a separate timeout so they
-// don't block the caller's context.
+// The power command and Wake-on-LAN (for "on") run synchronously within the
+// caller's context — WoL must complete before the response is sent because it
+// is the only mechanism to power on the NUCs. Boot macros, which require
+// waiting for the BIOS/UEFI, run in a background goroutine with a separate timeout.
 func (p *Provider) SetPowerState(ctx context.Context, state string) error {
 	if err := p.ensureConnected(ctx); err != nil {
 		return fmt.Errorf("failed to connect to JetKVM: %w", err)
@@ -40,103 +42,155 @@ func (p *Provider) SetPowerState(ctx context.Context, state string) error {
 		return err
 	}
 
-	// Run post-power-on tasks in the background with a dedicated timeout.
-	hasWoL := state == "on"
-	hasQueued := p.hasQueuedTasks(state)
+	// Synchronous: poll device readiness and send WoL packets on each interval
+	// until the device boots or the attempt limit is reached.
+	if state == "on" {
+		p.sendWakeOnLanUntilReady(ctx)
+	}
 
-	if hasWoL || hasQueued {
+	// Background: boot macros need to wait for BIOS, so they run with
+	// a dedicated timeout that outlives the request context.
+	if p.hasQueuedTasks(state) {
 		p.bgWg.Add(1)
 		go func() {
 			defer p.bgWg.Done()
-			p.postPowerOnTasks(state, hasQueued)
+			p.runBootMacros(state)
 		}()
 	}
 
 	return nil
 }
 
-// postPowerOnTasks handles WoL, device-ready waiting, and boot macro execution
-// after a power state change. It runs with its own timeout context.
-func (p *Provider) postPowerOnTasks(state string, hasQueued bool) {
-	ctx, cancel := context.WithTimeout(context.Background(), postPowerOnTimeout)
+// runBootMacros waits for the device to be ready and executes queued boot
+// macros. It runs in a background goroutine with its own timeout since
+// waiting for BIOS/UEFI can take minutes.
+func (p *Provider) runBootMacros(state string) {
+	ctx, cancel := context.WithTimeout(context.Background(), bootMacroTimeout)
 	defer cancel()
 
 	if err := p.ensureConnected(ctx); err != nil {
-		p.logger.Warn("failed to connect for post-power-on tasks",
+		p.logger.Warn("failed to connect for boot macros",
 			slog.String("host", p.host),
 			slog.String("error", err.Error()),
 		)
 		return
 	}
 
-	if state == "on" {
-		// Wait for the power extension to confirm the device is powered on
-		// before sending WoL packets — the NIC needs power to receive them.
-		if err := p.c.WaitForPowerState(ctx, client.PowerOn); err != nil {
-			p.logger.Warn("failed waiting for power state before WoL",
-				slog.String("host", p.host),
-				slog.String("error", err.Error()),
-			)
-		}
-		if p.wolDelay > 0 {
-			p.logger.Info("waiting before sending WoL",
-				slog.String("host", p.host),
-				slog.Duration("delay", p.wolDelay),
-			)
-			select {
-			case <-time.After(p.wolDelay):
-			case <-ctx.Done():
-				p.logger.Warn("WoL delay interrupted",
-					slog.String("host", p.host),
-					slog.String("error", ctx.Err().Error()),
-				)
-			}
-		}
-		if err := p.sendWakeOnLan(ctx); err != nil {
-			p.logger.Warn("wake-on-LAN failed",
-				slog.String("host", p.host),
-				slog.String("error", err.Error()),
-			)
-		}
-	}
-
-	if hasQueued {
-		p.waitForDeviceReady(ctx)
-		p.drainQueue(ctx, state)
-	}
+	p.waitForDeviceReady(ctx)
+	p.drainQueue(ctx, state)
 }
 
-// sendWakeOnLan retrieves configured WOL devices and sends magic packets for each.
-// All send errors are collected and returned as a combined error.
-func (p *Provider) sendWakeOnLan(ctx context.Context) error {
-	devices, err := p.c.GetWakeOnLanDevices(ctx)
+// macSeparator matches common MAC address separator characters.
+var macSeparator = regexp.MustCompile(`[:\-.]`)
+
+// buildMagicPacket constructs a Wake-on-LAN magic packet for the given MAC address.
+// The packet is 102 bytes: 6×0xFF followed by the 6-byte MAC repeated 16 times.
+func buildMagicPacket(mac string) ([]byte, error) {
+	clean := macSeparator.ReplaceAllString(strings.ToLower(mac), "")
+	if len(clean) != 12 {
+		return nil, fmt.Errorf("invalid MAC address: %q", mac)
+	}
+	hw, err := hex.DecodeString(clean)
 	if err != nil {
-		return fmt.Errorf("failed to get WOL devices: %w", err)
+		return nil, fmt.Errorf("invalid MAC address %q: %w", mac, err)
 	}
 
-	var errs []error
-	for _, dev := range devices {
-		if err := p.c.SendWOLMagicPacket(ctx, dev.MacAddress); err != nil {
-			p.logger.Warn("failed to send WOL packet",
+	pkt := make([]byte, 6+16*6)
+	for i := range 6 {
+		pkt[i] = 0xFF
+	}
+	for i := range 16 {
+		copy(pkt[6+i*6:], hw)
+	}
+	return pkt, nil
+}
+
+// sendWakeOnLan broadcasts a Wake-on-LAN magic packet directly from nana via UDP.
+// This avoids relying on the JetKVM device to relay the packet.
+func (p *Provider) sendWakeOnLan(ctx context.Context) error {
+	if p.mac == "" {
+		p.logger.Warn("skipping WoL: no MAC address configured",
+			slog.String("host", p.host),
+		)
+		return nil
+	}
+
+	pkt, err := buildMagicPacket(p.mac)
+	if err != nil {
+		return err
+	}
+
+	p.logger.Info("sending WoL magic packet",
+		slog.String("host", p.host),
+		slog.String("mac", p.mac),
+	)
+
+	// Use a UDP connection so that ctx cancellation is honoured via deadline.
+	var d net.Dialer
+	conn, err := d.DialContext(ctx, "udp", "255.255.255.255:9")
+	if err != nil {
+		return fmt.Errorf("WoL dial: %w", err)
+	}
+	defer conn.Close() //nolint:errcheck
+
+	if deadline, ok := ctx.Deadline(); ok {
+		conn.SetDeadline(deadline) //nolint:errcheck
+	}
+
+	if _, err := conn.Write(pkt); err != nil {
+		return fmt.Errorf("WOL packet to %s: %w", p.mac, err)
+	}
+
+	p.logger.Info("sent WoL magic packet",
+		slog.String("host", p.host),
+		slog.String("mac", p.mac),
+	)
+
+	return nil
+}
+
+// sendWakeOnLanUntilReady sends WoL packets on p.wolInterval until checkDeviceReady
+// returns true or p.wolMaxAttempts is exhausted. It is called synchronously so
+// that the API response is only sent after the device has come up (or we give up).
+func (p *Provider) sendWakeOnLanUntilReady(ctx context.Context) {
+	if p.mac == "" {
+		p.logger.Warn("skipping WoL: no MAC address configured",
+			slog.String("host", p.host),
+		)
+		return
+	}
+
+	for attempt := range p.wolMaxAttempts {
+		if err := p.sendWakeOnLan(ctx); err != nil {
+			p.logger.Warn("WoL packet failed",
 				slog.String("host", p.host),
-				slog.String("mac", dev.MacAddress),
-				slog.String("name", dev.Name),
+				slog.Int("attempt", attempt+1),
 				slog.String("error", err.Error()),
 			)
-			errs = append(
-				errs,
-				fmt.Errorf("WOL packet to %s (%s): %w", dev.Name, dev.MacAddress, err),
-			)
-		} else {
-			p.logger.Info("sent WOL magic packet",
+		}
+
+		videoReady, usbReady := p.checkDeviceReady(ctx)
+		if videoReady && usbReady {
+			p.logger.Info("device ready after WoL",
 				slog.String("host", p.host),
-				slog.String("mac", dev.MacAddress),
-				slog.String("name", dev.Name),
+				slog.Int("attempts", attempt+1),
 			)
+			return
+		}
+
+		if attempt < p.wolMaxAttempts-1 {
+			select {
+			case <-time.After(p.wolInterval):
+			case <-ctx.Done():
+				return
+			}
 		}
 	}
 
-	return errors.Join(errs...)
+	p.logger.Warn("device not ready after max WoL attempts",
+		slog.String("host", p.host),
+		slog.Int("maxAttempts", p.wolMaxAttempts),
+	)
 }
 
 // hasQueuedTasks reports whether any tasks are queued for the given power state.

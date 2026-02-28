@@ -34,9 +34,11 @@ type Provider struct {
 	c           *client.Client
 	host        string
 	password    string
-	timeout     time.Duration
-	wolDelay    time.Duration
-	logger      slog.Logger
+	mac             string // device MAC address used for Wake-on-LAN
+	timeout         time.Duration
+	wolInterval     time.Duration // interval between WoL retry attempts
+	wolMaxAttempts  int           // max WoL packets to send before giving up
+	logger          slog.Logger
 	bootDevices map[string]*BootDeviceConfig // keyed by device name (e.g. "pxe")
 
 	queueMu sync.Mutex
@@ -55,6 +57,7 @@ func newProvider(cfg map[string]any) (providers.Provider, error) {
 		return nil, fmt.Errorf("jetkvm provider requires 'host' config")
 	}
 	password, _ := cfg["password"].(string)
+	mac, _ := cfg["mac"].(string)
 
 	timeout := 30 * time.Second
 	if t, ok := cfg["timeout"].(int); ok && t > 0 {
@@ -74,22 +77,31 @@ func newProvider(cfg map[string]any) (providers.Provider, error) {
 
 	bootDevices := parseBootConfig(cfg)
 
-	var wolDelay time.Duration
-	if d, ok := cfg["wol_delay"].(string); ok && d != "" {
+	// WoL retry tuning: send packets on an interval until the device is
+	// ready or the attempt limit is reached.
+	wolInterval := 5 * time.Second
+	if d, ok := cfg["wol_interval"].(string); ok && d != "" {
 		if parsed, err := time.ParseDuration(d); err == nil {
-			wolDelay = parsed
+			wolInterval = parsed
 		}
 	}
 
+	wolMaxAttempts := 12 // ~1 minute at the default interval
+	if n, ok := cfg["wol_max_attempts"].(int); ok && n > 0 {
+		wolMaxAttempts = n
+	}
+
 	return &Provider{
-		c:           c,
-		host:        host,
-		password:    password,
-		timeout:     timeout,
-		wolDelay:    wolDelay,
-		logger:      *logger,
-		bootDevices: bootDevices,
-		queue:       make(map[string][]func(ctx context.Context) error),
+		c:               c,
+		host:            host,
+		password:        password,
+		mac:             mac,
+		timeout:         timeout,
+		wolInterval:     wolInterval,
+		wolMaxAttempts:  wolMaxAttempts,
+		logger:          *logger,
+		bootDevices:     bootDevices,
+		queue:           make(map[string][]func(ctx context.Context) error),
 	}, nil
 }
 
