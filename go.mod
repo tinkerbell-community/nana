@@ -9,7 +9,7 @@ require (
 	github.com/pion/webrtc/v4 v4.2.1
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.19.0
-	github.com/ubiquiti-community/go-unifi v1.33.39
+	github.com/ubiquiti-community/go-unifi v1.33.42
 	go.uber.org/automaxprocs v1.6.0
 	golang.org/x/crypto v0.47.0
 )
@@ -46,7 +46,6 @@ require (
 	github.com/spf13/cast v1.7.1 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/subosito/gotenv v1.6.0 // indirect
-	github.com/ubiquiti-community/terraform-provider-unifi v0.41.12 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
 	go.uber.org/atomic v1.9.0 // indirect
 	go.uber.org/multierr v1.9.0 // indirect
