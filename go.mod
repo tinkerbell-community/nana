@@ -5,7 +5,7 @@ go 1.25.0
 require (
 	github.com/KimMachineGun/automemlimit v0.7.5
 	github.com/coder/websocket v1.8.14
-	github.com/fsnotify/fsnotify v1.10.0
+	github.com/fsnotify/fsnotify v1.10.1
 	github.com/pion/webrtc/v4 v4.2.12
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.19.0
