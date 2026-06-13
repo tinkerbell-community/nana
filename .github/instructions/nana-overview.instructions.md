@@ -66,7 +66,7 @@ A `ManagedDevice` can have multiple providers. Calling e.g. `dev.PowerController
 
 Nana exposes the same capabilities through two APIs:
 
-1. **JSON-RPC** (`POST /rpc`) — bmclib-compatible, device identified by `X-Device` header or `host` body field
+1. **JSON-RPC** (`POST /`) — bmclib-compatible, device identified by `X-Device` header or `host` body field
 2. **Redfish v1** (`/redfish/v1/*`) — DMTF standard REST API, device identified by system ID in URL path
 
 Both APIs resolve devices through `DeviceManager.FindDevice()` which does case-insensitive name lookup then normalized MAC lookup.
