@@ -1,7 +1,9 @@
 // Package jetkvm implements a BMC provider for JetKVM devices.
 //
-// The JetKVM provider connects to a JetKVM device via WebRTC and provides
-// power control, virtual media, and BMC info capabilities.
+// The JetKVM provider talks to a JetKVM device over its local HTTP JSON-RPC
+// endpoint and provides power control, virtual media, and BMC info
+// capabilities. Requires firmware exposing POST /jsonrpc (stock firmware
+// serves JSON-RPC only over WebRTC).
 package jetkvm
 
 import (
@@ -31,15 +33,15 @@ type BootDeviceConfig struct {
 
 // Provider implements the providers.Provider interface for JetKVM devices.
 type Provider struct {
-	c           *client.Client
-	host        string
-	password    string
-	mac             string // device MAC address used for Wake-on-LAN
-	timeout         time.Duration
-	wolInterval     time.Duration // interval between WoL retry attempts
-	wolMaxAttempts  int           // max WoL packets to send before giving up
-	logger          slog.Logger
-	bootDevices map[string]*BootDeviceConfig // keyed by device name (e.g. "pxe")
+	c              *client.Client
+	host           string
+	password       string
+	mac            string // device MAC address used for Wake-on-LAN
+	timeout        time.Duration
+	wolInterval    time.Duration // interval between WoL retry attempts
+	wolMaxAttempts int           // max WoL packets to send before giving up
+	logger         slog.Logger
+	bootDevices    map[string]*BootDeviceConfig // keyed by device name (e.g. "pxe")
 
 	queueMu sync.Mutex
 	queue   map[string][]func(ctx context.Context) error // keyed by power state
@@ -92,16 +94,16 @@ func newProvider(cfg map[string]any) (providers.Provider, error) {
 	}
 
 	return &Provider{
-		c:               c,
-		host:            host,
-		password:        password,
-		mac:             mac,
-		timeout:         timeout,
-		wolInterval:     wolInterval,
-		wolMaxAttempts:  wolMaxAttempts,
-		logger:          *logger,
-		bootDevices:     bootDevices,
-		queue:           make(map[string][]func(ctx context.Context) error),
+		c:              c,
+		host:           host,
+		password:       password,
+		mac:            mac,
+		timeout:        timeout,
+		wolInterval:    wolInterval,
+		wolMaxAttempts: wolMaxAttempts,
+		logger:         *logger,
+		bootDevices:    bootDevices,
+		queue:          make(map[string][]func(ctx context.Context) error),
 	}, nil
 }
 
@@ -121,18 +123,18 @@ func (p *Provider) Capabilities() []providers.Capability {
 	return caps
 }
 
-// Open initializes the WebRTC connection to the JetKVM device.
+// Open authenticates with the JetKVM device.
 func (p *Provider) Open(ctx context.Context) error {
 	return p.c.Connect(ctx)
 }
 
-// ensureConnected lazily establishes the WebRTC connection if not already open.
-// It is safe to call on every operation — Connect is idempotent when connected.
+// ensureConnected lazily authenticates if not already logged in.
+// It is safe to call on every operation — Connect is idempotent and cheap.
 func (p *Provider) ensureConnected(ctx context.Context) error {
 	return p.c.Connect(ctx)
 }
 
-// Close releases the WebRTC connection and waits for background tasks to finish.
+// Close waits for background tasks to finish.
 func (p *Provider) Close() error {
 	p.bgWg.Wait()
 	return p.c.Close()

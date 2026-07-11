@@ -1,8 +1,15 @@
 // Package client provides a Go client for communicating with local JetKVM devices.
 //
-// JetKVM devices expose a WebSocket signaling endpoint that establishes WebRTC
-// peer connections. JSON-RPC commands are sent over the WebRTC data channel to
-// control the device (power management, virtual media, keyboard/mouse, etc.).
+// Commands are sent as JSON-RPC 2.0 requests to the device's local HTTP
+// endpoint (POST /jsonrpc) to control the device — power management, virtual
+// media, keyboard input, etc. — authenticated via the device's local password
+// session cookie.
+//
+// The /jsonrpc endpoint requires firmware that exposes the JSON-RPC dispatcher
+// over local HTTP; stock firmware serves JSON-RPC only on its WebRTC data
+// channel. Unlike a WebRTC session, HTTP calls never take over the device's
+// single interactive session, so automation does not kick a human operator
+// off the KVM console.
 //
 // Reference: https://github.com/jetkvm/kvm
 package client
@@ -10,8 +17,8 @@ package client
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -20,10 +27,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/coder/websocket"
-	"github.com/coder/websocket/wsjson"
-	"github.com/pion/webrtc/v4"
 )
 
 // PowerState represents the power state of a device managed by JetKVM.
@@ -137,27 +140,17 @@ type JSONRPCResponse struct {
 	ID      int64  `json:"id"`
 }
 
-// wsMessage is the envelope for WebSocket signaling messages.
-type wsMessage struct {
-	Type string          `json:"type"`
-	Data json.RawMessage `json:"data"`
-}
-
-// Client manages a connection to a local JetKVM device via WebRTC.
+// Client communicates with a local JetKVM device over its HTTP JSON-RPC
+// endpoint (POST /jsonrpc).
 type Client struct {
 	config     *Config
-	httpClient *http.Client // REST API calls (DisableKeepAlives for JetKVM compat)
-	wsClient   *http.Client // WebSocket upgrades (needs persistent connections)
+	httpClient *http.Client // cookie jar carries the local auth session
 	logger     *slog.Logger
 
-	mu     sync.Mutex
-	pc     *webrtc.PeerConnection
-	dc     *webrtc.DataChannel
-	closed bool
+	mu       sync.Mutex
+	loggedIn bool
 
-	nextID    atomic.Int64
-	pending   map[int64]chan *JSONRPCResponse
-	pendingMu sync.Mutex
+	nextID atomic.Int64
 }
 
 // NewClient creates a new JetKVM client with the given configuration.
@@ -183,14 +176,7 @@ func NewClient(config *Config) (*Client, error) {
 				DisableKeepAlives: true,
 			},
 		},
-		// Separate HTTP client for WebSocket upgrades: no DisableKeepAlives
-		// (which would send Connection:close conflicting with Connection:Upgrade)
-		// and no timeout (WebSocket connections are long-lived).
-		wsClient: &http.Client{
-			Jar: jar,
-		},
-		logger:  slog.Default(),
-		pending: make(map[int64]chan *JSONRPCResponse),
+		logger: slog.Default(),
 	}, nil
 }
 
@@ -227,13 +213,34 @@ func (c *Client) Login(ctx context.Context) error {
 		return fmt.Errorf("login failed (HTTP %d): %s", resp.StatusCode, errResp["error"])
 	}
 
+	c.mu.Lock()
+	c.loggedIn = true
+	c.mu.Unlock()
+
 	c.logger.Info("authenticated with JetKVM device", slog.String("host", c.config.Host))
 	return nil
 }
 
+// ensureAuthenticated logs in once per client lifetime; Reconnect (or an auth
+// rejection in Call) resets the state. Devices in noPassword mode skip this.
+func (c *Client) ensureAuthenticated(ctx context.Context) error {
+	if c.config.Password == "" {
+		return nil // noPassword mode
+	}
+
+	c.mu.Lock()
+	loggedIn := c.loggedIn
+	c.mu.Unlock()
+	if loggedIn {
+		return nil
+	}
+
+	return c.Login(ctx)
+}
+
 // GetDeviceInfo retrieves basic device information via the HTTP REST API.
 func (c *Client) GetDeviceInfo(ctx context.Context) (*DeviceInfo, error) {
-	if err := c.Login(ctx); err != nil {
+	if err := c.ensureAuthenticated(ctx); err != nil {
 		return nil, err
 	}
 
@@ -261,374 +268,105 @@ func (c *Client) GetDeviceInfo(ctx context.Context) (*DeviceInfo, error) {
 	return &info, nil
 }
 
-// Connect establishes a WebRTC connection to the JetKVM device.
-// This creates a data channel for sending JSON-RPC commands.
+// Connect verifies connectivity by authenticating with the device when a
+// password is configured. It is cheap and idempotent; the name is kept for
+// compatibility with the provider's Open/ensureConnected flow.
 func (c *Client) Connect(ctx context.Context) error {
-	c.mu.Lock()
-	if c.pc != nil {
-		c.mu.Unlock()
-		return nil // already connected
-	}
-	c.closed = false
-
-	// Authenticate first.
-	if err := c.Login(ctx); err != nil {
-		c.mu.Unlock()
-		return fmt.Errorf("authentication failed: %w", err)
-	}
-
-	// Create WebRTC peer connection.
-	peerConnection, err := webrtc.NewPeerConnection(webrtc.Configuration{})
-	if err != nil {
-		c.mu.Unlock()
-		return fmt.Errorf("failed to create peer connection: %w", err)
-	}
-
-	// Create a data channel for JSON-RPC messages.
-	// The JetKVM device will accept the data channel and process RPC messages on it.
-	dc, err := peerConnection.CreateDataChannel("rpc", nil)
-	if err != nil {
-		c.mu.Unlock()
-		_ = peerConnection.Close()
-		return fmt.Errorf("failed to create data channel: %w", err)
-	}
-
-	dcReady := make(chan struct{})
-
-	dc.OnOpen(func() {
-		c.logger.Info("data channel opened", slog.String("host", c.config.Host))
-		c.mu.Lock()
-		c.dc = dc
-		c.mu.Unlock()
-		close(dcReady)
-	})
-
-	dc.OnMessage(func(msg webrtc.DataChannelMessage) {
-		c.handleDataChannelMessage(msg)
-	})
-
-	dc.OnClose(func() {
-		c.logger.Info("data channel closed", slog.String("host", c.config.Host))
-		c.mu.Lock()
-		c.dc = nil
-		oldPC := c.pc
-		c.pc = nil
-		c.mu.Unlock()
-		c.failPendingRequests("data channel closed")
-		if oldPC != nil {
-			_ = oldPC.Close()
-		}
-	})
-
-	dc.OnError(func(err error) {
-		c.logger.Error(
-			"data channel error",
-			slog.String("host", c.config.Host),
-			slog.String("error", err.Error()),
-		)
-	})
-
-	peerConnection.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
-		c.logger.Debug("ICE connection state changed",
-			slog.String("host", c.config.Host),
-			slog.String("state", state.String()),
-		)
-	})
-
-	// Release the mutex before network operations; we only needed it for state checks and callback setup.
-	c.mu.Unlock()
-
-	// Create offer.
-	offer, err := peerConnection.CreateOffer(nil)
-	if err != nil {
-		_ = peerConnection.Close()
-		return fmt.Errorf("failed to create offer: %w", err)
-	}
-
-	if err := peerConnection.SetLocalDescription(offer); err != nil {
-		_ = peerConnection.Close()
-		return fmt.Errorf("failed to set local description: %w", err)
-	}
-
-	// Wait for ICE gathering to complete.
-	gatherComplete := webrtc.GatheringCompletePromise(peerConnection)
-	select {
-	case <-gatherComplete:
-	case <-ctx.Done():
-		_ = peerConnection.Close()
-		return fmt.Errorf("ICE gathering timed out: %w", ctx.Err())
-	}
-
-	// Connect to WebSocket signaling endpoint.
-	wsURL := fmt.Sprintf("ws://%s/webrtc/signaling/client", c.config.Host)
-
-	// Build WebSocket dial options with cookies from the HTTP client.
-	wsDialOpts := &websocket.DialOptions{
-		HTTPClient: c.wsClient,
-	}
-
-	ws, _, err := websocket.Dial(ctx, wsURL, wsDialOpts)
-	if err != nil {
-		_ = peerConnection.Close()
-		return fmt.Errorf("failed to connect to WebSocket: %w", err)
-	}
-
-	// Read the initial device-metadata message.
-	var metadataMsg wsMessage
-	if err := wsjson.Read(ctx, ws, &metadataMsg); err != nil {
-		_ = ws.Close(websocket.StatusNormalClosure, "")
-		_ = peerConnection.Close()
-		return fmt.Errorf("failed to read device metadata: %w", err)
-	}
-	c.logger.Debug("received device metadata", slog.String("type", metadataMsg.Type))
-
-	// Send the offer via WebSocket.
-	// JetKVM expects the SDP as a base64-encoded JSON SessionDescription.
-	localDesc := peerConnection.LocalDescription()
-	localDescJSON, err := json.Marshal(localDesc)
-	if err != nil {
-		_ = ws.Close(websocket.StatusNormalClosure, "")
-		_ = peerConnection.Close()
-		return fmt.Errorf("failed to marshal local description: %w", err)
-	}
-	sdpB64 := base64.StdEncoding.EncodeToString(localDescJSON)
-	offerMsg := map[string]any{
-		"type": "offer",
-		"data": map[string]any{
-			"sd": sdpB64,
-		},
-	}
-	if err := wsjson.Write(ctx, ws, offerMsg); err != nil {
-		_ = ws.Close(websocket.StatusNormalClosure, "")
-		_ = peerConnection.Close()
-		return fmt.Errorf("failed to send offer: %w", err)
-	}
-
-	// Read messages from WebSocket to get the answer and ICE candidates.
-	answerReceived := false
-	for !answerReceived {
-		var msg wsMessage
-		if err := wsjson.Read(ctx, ws, &msg); err != nil {
-			_ = ws.Close(websocket.StatusNormalClosure, "")
-			_ = peerConnection.Close()
-			return fmt.Errorf("failed to read WebSocket message: %w", err)
-		}
-
-		switch msg.Type {
-		case "answer":
-			// The answer data is a base64-encoded JSON SessionDescription string.
-			var answerB64 string
-			if err := json.Unmarshal(msg.Data, &answerB64); err != nil {
-				_ = ws.Close(websocket.StatusNormalClosure, "")
-				_ = peerConnection.Close()
-				return fmt.Errorf("failed to parse answer data: %w", err)
-			}
-
-			answerJSON, err := base64.StdEncoding.DecodeString(answerB64)
-			if err != nil {
-				_ = ws.Close(websocket.StatusNormalClosure, "")
-				_ = peerConnection.Close()
-				return fmt.Errorf("failed to base64-decode answer: %w", err)
-			}
-
-			var answer webrtc.SessionDescription
-			if err := json.Unmarshal(answerJSON, &answer); err != nil {
-				_ = ws.Close(websocket.StatusNormalClosure, "")
-				_ = peerConnection.Close()
-				return fmt.Errorf("failed to parse answer SDP: %w", err)
-			}
-
-			if err := peerConnection.SetRemoteDescription(answer); err != nil {
-				_ = ws.Close(websocket.StatusNormalClosure, "")
-				_ = peerConnection.Close()
-				return fmt.Errorf("failed to set remote description: %w", err)
-			}
-			answerReceived = true
-
-		case "new-ice-candidate":
-			var candidate webrtc.ICECandidateInit
-			if err := json.Unmarshal(msg.Data, &candidate); err != nil {
-				c.logger.Warn("failed to parse ICE candidate", slog.String("error", err.Error()))
-				continue
-			}
-			if candidate.Candidate == "" {
-				continue
-			}
-			if err := peerConnection.AddICECandidate(candidate); err != nil {
-				c.logger.Warn("failed to add ICE candidate", slog.String("error", err.Error()))
-			}
-		}
-	}
-
-	// Start a goroutine to handle ongoing ICE candidates from WebSocket.
-	go func() {
-		defer func() { _ = ws.Close(websocket.StatusNormalClosure, "") }()
-		for {
-			var msg wsMessage
-			if err := wsjson.Read(context.Background(), ws, &msg); err != nil {
-				return
-			}
-			if msg.Type == "new-ice-candidate" {
-				var candidate webrtc.ICECandidateInit
-				if err := json.Unmarshal(msg.Data, &candidate); err != nil {
-					continue
-				}
-				if candidate.Candidate != "" {
-					_ = peerConnection.AddICECandidate(candidate)
-				}
-			}
-		}
-	}()
-
-	c.mu.Lock()
-	c.pc = peerConnection
-	c.mu.Unlock()
-
-	// Wait for data channel to be ready.
-	select {
-	case <-dcReady:
-		c.logger.Info("WebRTC connection established", slog.String("host", c.config.Host))
-		return nil
-	case <-ctx.Done():
-		c.mu.Lock()
-		_ = peerConnection.Close()
-		c.pc = nil
-		c.mu.Unlock()
-		return fmt.Errorf("data channel open timed out: %w", ctx.Err())
-	}
+	return c.ensureAuthenticated(ctx)
 }
 
-// Close closes the WebRTC connection to the JetKVM device.
+// Close is retained for interface compatibility. The HTTP transport holds no
+// long-lived connection state to tear down.
 func (c *Client) Close() error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	c.closed = true
-
-	if c.dc != nil {
-		_ = c.dc.Close()
-		c.dc = nil
-	}
-	if c.pc != nil {
-		err := c.pc.Close()
-		c.pc = nil
-		return err
-	}
 	return nil
 }
 
-// Reconnect forces a close and re-establishes the WebRTC connection.
+// Reconnect drops the authenticated session and logs in again.
 func (c *Client) Reconnect(ctx context.Context) error {
-	c.failPendingRequests("reconnecting")
-	_ = c.Close()
-	return c.Connect(ctx)
+	c.mu.Lock()
+	c.loggedIn = false
+	c.mu.Unlock()
+	return c.ensureAuthenticated(ctx)
 }
 
-// Call sends a JSON-RPC request over the WebRTC data channel and waits for the response.
-// If the data channel is closed, it attempts to reconnect before failing.
+// errUnauthorized signals that the device rejected the auth session cookie.
+var errUnauthorized = errors.New("device rejected session credentials")
+
+// Call sends a JSON-RPC 2.0 request to the device's local /jsonrpc endpoint
+// and returns the decoded response. If the device rejects the session cookie
+// (e.g. it expired or the device rebooted), it re-authenticates and retries
+// once.
 func (c *Client) Call(
 	ctx context.Context,
 	method string,
 	params map[string]any,
 ) (*JSONRPCResponse, error) {
-	c.mu.Lock()
-	dc := c.dc
-	c.mu.Unlock()
-
-	if dc == nil {
-		c.logger.Info("data channel nil, attempting reconnect", slog.String("host", c.config.Host))
-		if err := c.Reconnect(ctx); err != nil {
-			return nil, fmt.Errorf("reconnect failed: %w", err)
-		}
-		c.mu.Lock()
-		dc = c.dc
-		c.mu.Unlock()
-		if dc == nil {
-			return nil, fmt.Errorf("not connected: data channel is nil after reconnect")
-		}
+	if err := c.ensureAuthenticated(ctx); err != nil {
+		return nil, err
 	}
 
-	id := c.nextID.Add(1)
+	resp, err := c.doCall(ctx, method, params)
+	if !errors.Is(err, errUnauthorized) {
+		return resp, err
+	}
 
+	// Session cookie no longer valid — log in again and retry once.
+	if err := c.Reconnect(ctx); err != nil {
+		return nil, err
+	}
+	return c.doCall(ctx, method, params)
+}
+
+// doCall performs a single JSON-RPC round trip over HTTP.
+func (c *Client) doCall(
+	ctx context.Context,
+	method string,
+	params map[string]any,
+) (*JSONRPCResponse, error) {
 	req := JSONRPCRequest{
 		JSONRPC: "2.0",
 		Method:  method,
 		Params:  params,
-		ID:      id,
+		ID:      c.nextID.Add(1),
 	}
 
-	data, err := json.Marshal(req)
+	payload, err := json.Marshal(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	// Register a response channel for this request ID.
-	respCh := make(chan *JSONRPCResponse, 1)
-	c.pendingMu.Lock()
-	c.pending[id] = respCh
-	c.pendingMu.Unlock()
+	rpcURL := fmt.Sprintf("http://%s/jsonrpc", c.config.Host)
+	httpReq, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		rpcURL,
+		bytes.NewReader(payload),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create RPC request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
 
-	defer func() {
-		c.pendingMu.Lock()
-		delete(c.pending, id)
-		c.pendingMu.Unlock()
-	}()
+	httpResp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("RPC request failed: %w", err)
+	}
+	defer func() { _ = httpResp.Body.Close() }()
 
-	// Send the request.
-	if err := dc.SendText(string(data)); err != nil {
-		return nil, fmt.Errorf("failed to send RPC request: %w", err)
+	switch {
+	case httpResp.StatusCode == http.StatusUnauthorized ||
+		httpResp.StatusCode == http.StatusForbidden:
+		return nil, errUnauthorized
+	case httpResp.StatusCode != http.StatusOK:
+		return nil, fmt.Errorf("RPC request failed with HTTP %d", httpResp.StatusCode)
 	}
 
-	// Wait for the response.
-	select {
-	case resp := <-respCh:
-		return resp, nil
-	case <-ctx.Done():
-		return nil, fmt.Errorf("RPC call timed out: %w", ctx.Err())
-	}
-}
-
-// failPendingRequests sends error responses to all pending RPC calls.
-// This is called when the data channel closes unexpectedly so callers
-// don't hang until their context times out.
-func (c *Client) failPendingRequests(reason string) {
-	c.pendingMu.Lock()
-	pending := c.pending
-	c.pending = make(map[int64]chan *JSONRPCResponse)
-	c.pendingMu.Unlock()
-
-	for _, ch := range pending {
-		ch <- &JSONRPCResponse{
-			JSONRPC: "2.0",
-			Error:   reason,
-		}
-	}
-}
-
-// handleDataChannelMessage processes incoming messages on the data channel.
-func (c *Client) handleDataChannelMessage(msg webrtc.DataChannelMessage) {
-	var resp JSONRPCResponse
-	if err := json.Unmarshal(msg.Data, &resp); err != nil {
-		c.logger.Warn("failed to parse data channel message",
-			slog.String("error", err.Error()),
-			slog.String("data", string(msg.Data)),
-		)
-		return
+	var rpcResp JSONRPCResponse
+	if err := json.NewDecoder(httpResp.Body).Decode(&rpcResp); err != nil {
+		return nil, fmt.Errorf("failed to decode RPC response: %w", err)
 	}
 
-	c.pendingMu.Lock()
-	ch, ok := c.pending[resp.ID]
-	c.pendingMu.Unlock()
-
-	if ok {
-		ch <- &resp
-	} else {
-		// This may be an event/notification from the device (no matching request).
-		c.logger.Debug("received unmatched response",
-			slog.Int64("id", resp.ID),
-			slog.String("data", string(msg.Data)),
-		)
-	}
+	return &rpcResp, nil
 }
 
 // --- High-Level Power Management ---

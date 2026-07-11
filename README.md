@@ -45,7 +45,7 @@ graph TB
     RPC & RED --> DM
     DM --> PR
     PR --> JK & UF & FP
-    JK -- "WebRTC / JSON-RPC" --> KVM1 & KVM2
+    JK -- "HTTP JSON-RPC" --> KVM1 & KVM2
     UF -- "SSH / swctrl" --> USW
     KVM1 -. "ATX/DC/USB/Video" .-> SRV1
     USW -. "PoE Port" .-> SRV2
@@ -169,7 +169,7 @@ stateDiagram-v2
 
 ### JetKVM
 
-The [JetKVM](https://github.com/jetkvm/kvm) provider connects to local JetKVM devices via WebRTC and provides comprehensive BMC capabilities.
+The [JetKVM](https://github.com/jetkvm/kvm) provider talks to local JetKVM devices over their HTTP JSON-RPC endpoint (`POST /jsonrpc`) and provides comprehensive BMC capabilities. This requires firmware that exposes the JSON-RPC dispatcher over local HTTP — stock firmware serves JSON-RPC only on its WebRTC data channel. Unlike a WebRTC session, HTTP calls never take over the device's single interactive session, so automation does not kick an operator off the KVM console.
 
 **Capabilities:** `power_control`, `virtual_media`, `bmc_info`, `boot_device` (when boot macros are configured)
 
@@ -183,17 +183,7 @@ sequenceDiagram
     N->>K: POST /auth/login-local (password)
     K-->>N: Session cookie
 
-    N->>K: WebSocket /webrtc/signaling/client
-    K-->>N: Device metadata
-
-    N->>K: SDP Offer (base64)
-    K-->>N: SDP Answer (base64)
-    Note over N,K: ICE candidate exchange
-
-    N->>K: WebRTC Data Channel "rpc" opened
-    Note over N,K: JSON-RPC over DataChannel
-
-    N->>K: {"method": "getATXState"}
+    N->>K: POST /jsonrpc {"method": "getATXState"}
     K-->>N: {"result": {"powerLED": true}}
 ```
 
@@ -474,8 +464,8 @@ nana/
 │       │   ├── media.go   # Virtual media mount/unmount
 │       │   ├── boot.go    # Boot device keyboard macros
 │       │   ├── info.go    # BMC version info
-│       │   └── client/    # WebRTC JSON-RPC client for JetKVM devices
-│       │       ├── jetkvm.go      # Full client: WebRTC, data channel, RPC calls
+│       │   └── client/    # HTTP JSON-RPC client for JetKVM devices
+│       │       ├── jetkvm.go      # Full client: auth, JSON-RPC calls, typed wrappers
 │       │       └── jetkvm_test.go
 │       └── unifi/         # UniFi provider implementation
 │           ├── unifi.go   # Provider struct, factory, uplink discovery, SSH execution
@@ -500,7 +490,7 @@ Configuration via YAML file, environment variables (`JETKVM_API_` prefix), or CL
 | `port` | `--port` | `JETKVM_API_PORT` | `5000` | HTTP server port |
 | `address` | `--address` | `JETKVM_API_ADDRESS` | `0.0.0.0` | HTTP server bind address |
 | `log_level` | `--log-level` | `JETKVM_API_LOG_LEVEL` | `info` | Log level (debug, info, warn, error) |
-| `webrtc_timeout` | `--webrtc-timeout` | `JETKVM_API_WEBRTC_TIMEOUT` | `30` | WebRTC connection timeout (seconds) |
+| `webrtc_timeout` | `--webrtc-timeout` | `JETKVM_API_WEBRTC_TIMEOUT` | `30` | Device call timeout in seconds (name kept for config compatibility) |
 | `maxprocs_enable` | — | `JETKVM_API_MAXPROCS_ENABLE` | `true` | Auto-set GOMAXPROCS |
 | `memlimit_enable` | — | `JETKVM_API_MEMLIMIT_ENABLE` | `true` | Auto-set GOMEMLIMIT |
 | `memlimit_ratio` | — | `JETKVM_API_MEMLIMIT_RATIO` | `0.9` | Memory limit ratio |

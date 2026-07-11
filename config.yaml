@@ -2,7 +2,8 @@
 port: 5000
 address: "0.0.0.0"
 
-# WebRTC connection timeout (seconds)
+# Device call timeout in seconds (key name kept for config compatibility;
+# JetKVM devices are reached over HTTP JSON-RPC, not WebRTC)
 webrtc_timeout: 30
 
 # Global SSH key path (used by SSH-based providers like unifi, can be

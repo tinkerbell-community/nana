@@ -224,16 +224,38 @@ func TestProviderConfigWithDefaults(t *testing.T) {
 		expected ProviderConfig
 	}{
 		{
-			name:     "empty device inherits all defaults",
-			device:   ProviderConfig{Type: "jetkvm"},
-			defaults: ProviderConfig{Type: "jetkvm", Host: "10.0.0.1", Password: "secret", APIKey: "key1", Site: "site1"},
-			expected: ProviderConfig{Type: "jetkvm", Host: "10.0.0.1", Password: "secret", APIKey: "key1", Site: "site1"},
+			name:   "empty device inherits all defaults",
+			device: ProviderConfig{Type: "jetkvm"},
+			defaults: ProviderConfig{
+				Type:     "jetkvm",
+				Host:     "10.0.0.1",
+				Password: "secret",
+				APIKey:   "key1",
+				Site:     "site1",
+			},
+			expected: ProviderConfig{
+				Type:     "jetkvm",
+				Host:     "10.0.0.1",
+				Password: "secret",
+				APIKey:   "key1",
+				Site:     "site1",
+			},
 		},
 		{
-			name:     "device values override defaults",
-			device:   ProviderConfig{Type: "jetkvm", Host: "192.168.1.1", Password: "mypass"},
-			defaults: ProviderConfig{Type: "jetkvm", Host: "10.0.0.1", Password: "secret", Site: "default"},
-			expected: ProviderConfig{Type: "jetkvm", Host: "192.168.1.1", Password: "mypass", Site: "default"},
+			name:   "device values override defaults",
+			device: ProviderConfig{Type: "jetkvm", Host: "192.168.1.1", Password: "mypass"},
+			defaults: ProviderConfig{
+				Type:     "jetkvm",
+				Host:     "10.0.0.1",
+				Password: "secret",
+				Site:     "default",
+			},
+			expected: ProviderConfig{
+				Type:     "jetkvm",
+				Host:     "192.168.1.1",
+				Password: "mypass",
+				Site:     "default",
+			},
 		},
 		{
 			name:     "device boot overrides default boot",
