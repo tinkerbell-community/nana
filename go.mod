@@ -3,7 +3,7 @@ module github.com/tinkerbell-community/nana
 go 1.25.0
 
 require (
-	github.com/KimMachineGun/automemlimit v0.7.5
+	github.com/KimMachineGun/automemlimit v1.0.0
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.19.0
