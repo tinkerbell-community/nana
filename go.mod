@@ -7,7 +7,7 @@ require (
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.19.0
-	github.com/ubiquiti-community/go-unifi v1.33.42
+	github.com/ubiquiti-community/go-unifi v1.34.0
 	go.uber.org/automaxprocs v1.6.0
 	golang.org/x/crypto v0.55.0
 )
