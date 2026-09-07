@@ -1,6 +1,6 @@
 module github.com/tinkerbell-community/nana
 
-go 1.25.0
+go 1.26.0
 
 require (
 	github.com/KimMachineGun/automemlimit v1.0.0
@@ -9,7 +9,7 @@ require (
 	github.com/spf13/viper v1.19.0
 	github.com/ubiquiti-community/go-unifi v1.34.0
 	go.uber.org/automaxprocs v1.6.0
-	golang.org/x/crypto v0.55.0
+	golang.org/x/crypto v0.56.0
 )
 
 require (
